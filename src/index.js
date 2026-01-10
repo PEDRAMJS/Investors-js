@@ -23,6 +23,24 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
+const verifyTokenAndApproval = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
+
+  try {
+    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = verified;
+    next();
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid token.' });
+  }
+};
+
+
 // MySQL Database Connection
 const db = mysql.createConnection({
   host: process.env.DB_HOST,
@@ -83,6 +101,378 @@ const upload = multer({
   limits: { fileSize: 2 * 1024 * 1024 } // 2MB limit
 });
 // ========== END FILE UPLOAD CONFIG ==========
+
+// ========== MAPS ROUTES ==========
+
+// Get all maps (public, but requires authentication)
+app.get('/api/maps', verifyTokenAndApproval, (req, res) => {
+  const getMapsQuery = `
+    SELECT 
+      m.*,
+      u.name as uploaded_by_name,
+      u.phone_number as uploaded_by_phone
+    FROM maps m
+    LEFT JOIN users u ON m.uploaded_by = u.id
+    ORDER BY m.created_at DESC
+  `;
+  
+  db.query(getMapsQuery, (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch maps' });
+    }
+    res.json(results);
+  });
+});
+
+// Get single map by ID
+app.get('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
+  const getMapQuery = `
+    SELECT 
+      m.*,
+      u.name as uploaded_by_name,
+      u.phone_number as uploaded_by_phone
+    FROM maps m
+    LEFT JOIN users u ON m.uploaded_by = u.id
+    WHERE m.id = ?
+  `;
+  
+  db.query(getMapQuery, [req.params.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch map' });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Map not found' });
+    }
+    
+    res.json(results[0]);
+  });
+});
+
+// Configure storage for maps
+const mapsStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads/maps');
+    
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename: timestamp-random-originalname
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 10000);
+    const ext = path.extname(file.originalname);
+    const originalName = path.basename(file.originalname, ext);
+    const safeName = originalName.replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+    const filename = `map_${timestamp}_${random}_${safeName}${ext}`;
+    cb(null, filename);
+  }
+});
+
+// File filter for maps (images, PDF, zip, rar)
+const mapsFileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|bmp|webp|pdf|zip|rar/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+  
+  if (mimetype && extname) {
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      cb(new Error('File size exceeds 5MB limit'), false);
+    } else {
+      cb(null, true);
+    }
+  } else {
+    cb(new Error('Only image, PDF, and archive files are allowed'), false);
+  }
+};
+
+// Create upload middleware for maps
+const uploadMap = multer({ 
+  storage: mapsStorage,
+  fileFilter: mapsFileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 } // 5MB limit
+});
+
+// Upload map (Admin only)
+app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), async (req, res) => {
+  try {
+    // Check if user is admin
+    const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
+    db.query(checkAdminQuery, [req.user.id], (err, results) => {
+      if (err || !results[0]?.is_admin) {
+        // Clean up uploaded file if not admin
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(403).json({ error: 'Admin access required for upload' });
+      }
+
+      const { title, description, uploaded_by } = req.body;
+      
+      // Validate required fields
+      if (!title || !title.trim()) {
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(400).json({ error: 'Title is required' });
+      }
+      
+      if (!req.file) {
+        return res.status(400).json({ error: 'File is required' });
+      }
+      
+      // Get user info for uploaded_by_name
+      const getUserQuery = 'SELECT name FROM users WHERE id = ?';
+      db.query(getUserQuery, [uploaded_by || req.user.id], (err, userResults) => {
+        if (err) {
+          console.error('Database error:', err);
+          if (req.file) {
+            fs.unlinkSync(req.file.path);
+          }
+          return res.status(500).json({ error: 'Database error' });
+        }
+        
+        const uploadedByName = userResults.length > 0 ? userResults[0].name : 'Admin';
+        
+        // Prepare file path for database
+        const filePath = `/uploads/maps/${req.file.filename}`;
+        
+        // Determine file type
+        let fileType = req.file.mimetype;
+        
+        // Insert map into database
+        const insertMapQuery = `
+          INSERT INTO maps (
+            title, description, file_path, file_type, file_size,
+            uploaded_by, uploaded_by_name
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
+        
+        db.query(
+          insertMapQuery,
+          [
+            title.trim(),
+            description ? description.trim() : null,
+            filePath,
+            fileType,
+            req.file.size,
+            uploaded_by || req.user.id,
+            uploadedByName
+          ],
+          (err, result) => {
+            if (err) {
+              console.error('Database error:', err);
+              // Clean up uploaded file on DB error
+              if (req.file) {
+                fs.unlinkSync(req.file.path);
+              }
+              return res.status(500).json({ error: 'Failed to save map to database' });
+            }
+            
+            // Get the created map with user info
+            const getMapQuery = `
+              SELECT 
+                m.*,
+                u.name as uploaded_by_name,
+                u.phone_number as uploaded_by_phone
+              FROM maps m
+              LEFT JOIN users u ON m.uploaded_by = u.id
+              WHERE m.id = ?
+            `;
+            
+            db.query(getMapQuery, [result.insertId], (err, mapResults) => {
+              if (err) {
+                console.error('Database error:', err);
+                // Map is saved, but we can't return full data
+                return res.status(201).json({
+                  id: result.insertId,
+                  title: title.trim(),
+                  file_path: filePath,
+                  message: 'Map uploaded successfully'
+                });
+              }
+              
+              res.status(201).json(mapResults[0]);
+            });
+          }
+        );
+      });
+    });
+  } catch (error) {
+    console.error('Upload error:', error);
+    // Clean up uploaded file on error
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ 
+      error: 'Server error during upload',
+      details: error.message 
+    });
+  }
+});
+
+// Update map (Admin only - only title and description)
+app.put('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
+  // Check if user is admin
+  const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
+  db.query(checkAdminQuery, [req.user.id], (err, results) => {
+    if (err || !results[0]?.is_admin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const { title, description } = req.body;
+    
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+    
+    // First check if map exists
+    const checkMapQuery = 'SELECT * FROM maps WHERE id = ?';
+    db.query(checkMapQuery, [req.params.id], (err, mapResults) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      
+      if (mapResults.length === 0) {
+        return res.status(404).json({ error: 'Map not found' });
+      }
+      
+      // Update map (only title and description)
+      const updateMapQuery = `
+        UPDATE maps 
+        SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `;
+      
+      db.query(
+        updateMapQuery,
+        [
+          title.trim(),
+          description ? description.trim() : null,
+          req.params.id
+        ],
+        (err) => {
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Failed to update map' });
+          }
+          
+          // Get updated map
+          const getUpdatedQuery = `
+            SELECT 
+              m.*,
+              u.name as uploaded_by_name,
+              u.phone_number as uploaded_by_phone
+            FROM maps m
+            LEFT JOIN users u ON m.uploaded_by = u.id
+            WHERE m.id = ?
+          `;
+          
+          db.query(getUpdatedQuery, [req.params.id], (err, updatedResults) => {
+            if (err) {
+              console.error('Database error:', err);
+              return res.status(500).json({ error: 'Failed to fetch updated map' });
+            }
+            
+            res.json(updatedResults[0]);
+          });
+        }
+      );
+    });
+  });
+});
+
+// Delete map (Admin only)
+app.delete('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
+  // Check if user is admin
+  const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
+  db.query(checkAdminQuery, [req.user.id], (err, results) => {
+    if (err || !results[0]?.is_admin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    // First get map to delete its file
+    const getMapQuery = 'SELECT file_path FROM maps WHERE id = ?';
+    db.query(getMapQuery, [req.params.id], (err, mapResults) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      
+      if (mapResults.length === 0) {
+        return res.status(404).json({ error: 'Map not found' });
+      }
+      
+      const filePath = mapResults[0].file_path;
+      
+      // Delete map from database
+      const deleteMapQuery = 'DELETE FROM maps WHERE id = ?';
+      db.query(deleteMapQuery, [req.params.id], (err) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to delete map' });
+        }
+        
+        // Delete the file
+        if (filePath) {
+          const fullPath = path.join(__dirname, '..', filePath);
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+          }
+        }
+        
+        res.json({ message: 'Map deleted successfully' });
+      });
+    });
+  });
+});
+
+// Get maps statistics
+app.get('/api/maps/stats', verifyTokenAndApproval, (req, res) => {
+  const statsQuery = `
+    SELECT 
+      COUNT(*) as total_maps,
+      COALESCE(SUM(file_size), 0) as total_size,
+      COALESCE(AVG(file_size), 0) as average_size,
+      COUNT(CASE WHEN MONTH(created_at) = MONTH(CURRENT_DATE()) 
+                AND YEAR(created_at) = YEAR(CURRENT_DATE()) 
+                THEN 1 END) as this_month,
+      MAX(created_at) as last_upload_date,
+      (
+        SELECT uploaded_by_name 
+        FROM maps 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      ) as last_uploader
+    FROM maps
+  `;
+  
+  db.query(statsQuery, (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch map statistics' });
+    }
+    
+    res.json(results[0] || {
+      total_maps: 0,
+      total_size: 0,
+      average_size: 0,
+      this_month: 0,
+      last_upload_date: null,
+      last_uploader: null
+    });
+  });
+});
+// ========== END MAPS ROUTES ==========
+
 
 const createUploadsDir = () => {
   const uploadsDir = path.join(__dirname, '../uploads');
@@ -157,23 +547,6 @@ db.connect((err) => {
 // }
 
 // Middleware to verify JWT token
-
-const verifyTokenAndApproval = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
-  }
-
-  try {
-    const verified = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = verified;
-    next();
-  } catch (err) {
-    res.status(400).json({ error: 'Invalid token.' });
-  }
-};
 
 // Routes
 app.get('/api/health', (req, res) => {
@@ -319,7 +692,8 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
           relative2_relation || null,
           relative2_phone || null,
           idPhotoPath,
-          0 // Default not approved
+          1,
+          // 0 // Default not approved
         ],
         (err, result) => {
           if (err) {
@@ -430,9 +804,10 @@ app.post('/api/auth/login', (req, res) => {
           id: user.id,
           name: user.name,
           phone_number: user.phone_number,
+          is_admin: user.is_admin,
           approved: user.approved,
           approved_at: user.approved_at,
-          created_at: user.created_at
+          created_at: user.created_at,
         }
       });
     });
@@ -445,7 +820,7 @@ app.post('/api/auth/login', (req, res) => {
 // Get current user profile
 app.get('/api/auth/me', verifyTokenAndApproval, (req, res) => {
   // Allow users to check their status even if not approved
-  const findUserQuery = 'SELECT id, name, phone_number, approved, approved_at FROM users WHERE id = ?';
+  const findUserQuery = 'SELECT id, name, phone_number, approved, approved_at, is_admin FROM users WHERE id = ?';
   
   db.query(findUserQuery, [req.user.id], (err, results) => {
     if (err) {
@@ -456,7 +831,7 @@ app.get('/api/auth/me', verifyTokenAndApproval, (req, res) => {
     if (results.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-
+    
     res.json({ user: results[0] });
   });
 });
