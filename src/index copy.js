@@ -522,7 +522,7 @@ db.connect((err) => {
 //     )
 //   `;
 
-//   // Create customers table (updated with user_id foreign key)
+  // Create customers table (updated with user_id foreign key)
 //   const createCustomersTable = `
 //     CREATE TABLE IF NOT EXISTS customers (
 //       id INT AUTO_INCREMENT PRIMARY KEY,

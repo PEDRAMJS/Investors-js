@@ -40,30 +40,68 @@ const verifyTokenAndApproval = (req, res, next) => {
   }
 };
 
+// // MySQL Database Connection
+// const db = mysql.createConnection({
+//   host: process.env.DB_HOST,
+//   port: process.env.DB_PORT,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME,
+//   // waitForConnections: true,
+//   // connectionLimit: 10,
+//   // queueLimit: 0
+// });
+
+// // Connect to MySQL
+// db.connect((err) => {
+//   if (err) {
+//     console.error('Error connecting to MySQL:', err);
+//     process.exit(1);
+//   }
+//   console.log('Connected to MySQL database');
+
+//   // Initialize database tables
+//   //   initializeDatabase();
+// });
 
 // MySQL Database Connection
-const db = mysql.createConnection({
+const db = mysql.createPool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
+  pool: true
+  // connectionLimit: 10,
+  // queueLimit: 0
 });
+
+
+// Connect to MySQL
+db.getConnection((err) => {
+  if (err) {
+    console.error('Error connecting to MySQL:', err);
+    process.exit(1);
+  }
+  console.log('Connected to MySQL database');
+
+  // Initialize database tables
+  //   initializeDatabase();
+});
+
 
 // ========== FILE UPLOAD CONFIGURATION ==========
 // Configure file upload storage
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, '../uploads/id-photos');
-    
+
     // Create directory if it doesn't exist
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
-    
+
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
@@ -81,7 +119,7 @@ const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|bmp|webp/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
-  
+
   if (mimetype && extname) {
     // Check file size (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
@@ -95,7 +133,7 @@ const fileFilter = (req, file, cb) => {
 };
 
 // Create upload middleware instance
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: { fileSize: 2 * 1024 * 1024 } // 2MB limit
@@ -115,7 +153,7 @@ app.get('/api/maps', verifyTokenAndApproval, (req, res) => {
     LEFT JOIN users u ON m.uploaded_by = u.id
     ORDER BY m.created_at DESC
   `;
-  
+
   db.query(getMapsQuery, (err, results) => {
     if (err) {
       console.error('Database error:', err);
@@ -136,17 +174,17 @@ app.get('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
     LEFT JOIN users u ON m.uploaded_by = u.id
     WHERE m.id = ?
   `;
-  
+
   db.query(getMapQuery, [req.params.id], (err, results) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Failed to fetch map' });
     }
-    
+
     if (results.length === 0) {
       return res.status(404).json({ error: 'Map not found' });
     }
-    
+
     res.json(results[0]);
   });
 });
@@ -155,12 +193,12 @@ app.get('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
 const mapsStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, '../uploads/maps');
-    
+
     // Create directory if it doesn't exist
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
-    
+
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
@@ -180,7 +218,7 @@ const mapsFileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|bmp|webp|pdf|zip|rar/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
-  
+
   if (mimetype && extname) {
     // Check file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
@@ -194,7 +232,7 @@ const mapsFileFilter = (req, file, cb) => {
 };
 
 // Create upload middleware for maps
-const uploadMap = multer({ 
+const uploadMap = multer({
   storage: mapsStorage,
   fileFilter: mapsFileFilter,
   limits: { fileSize: 20 * 1024 * 1024 } // 5MB limit
@@ -215,7 +253,7 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
       }
 
       const { title, description, uploaded_by } = req.body;
-      
+
       // Validate required fields
       if (!title || !title.trim()) {
         if (req.file) {
@@ -223,11 +261,11 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
         }
         return res.status(400).json({ error: 'Title is required' });
       }
-      
+
       if (!req.file) {
         return res.status(400).json({ error: 'File is required' });
       }
-      
+
       // Get user info for uploaded_by_name
       const getUserQuery = 'SELECT name FROM users WHERE id = ?';
       db.query(getUserQuery, [uploaded_by || req.user.id], (err, userResults) => {
@@ -238,15 +276,15 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
           }
           return res.status(500).json({ error: 'Database error' });
         }
-        
+
         const uploadedByName = userResults.length > 0 ? userResults[0].name : 'Admin';
-        
+
         // Prepare file path for database
         const filePath = `/uploads/maps/${req.file.filename}`;
-        
+
         // Determine file type
         let fileType = req.file.mimetype;
-        
+
         // Insert map into database
         const insertMapQuery = `
           INSERT INTO maps (
@@ -254,7 +292,7 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
             uploaded_by, uploaded_by_name
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
-        
+
         db.query(
           insertMapQuery,
           [
@@ -275,7 +313,7 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
               }
               return res.status(500).json({ error: 'Failed to save map to database' });
             }
-            
+
             // Get the created map with user info
             const getMapQuery = `
               SELECT 
@@ -286,7 +324,7 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
               LEFT JOIN users u ON m.uploaded_by = u.id
               WHERE m.id = ?
             `;
-            
+
             db.query(getMapQuery, [result.insertId], (err, mapResults) => {
               if (err) {
                 console.error('Database error:', err);
@@ -298,7 +336,7 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
                   message: 'Map uploaded successfully'
                 });
               }
-              
+
               res.status(201).json(mapResults[0]);
             });
           }
@@ -311,9 +349,9 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
     if (req.file) {
       fs.unlinkSync(req.file.path);
     }
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Server error during upload',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -328,11 +366,11 @@ app.put('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
     }
 
     const { title, description } = req.body;
-    
+
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'Title is required' });
     }
-    
+
     // First check if map exists
     const checkMapQuery = 'SELECT * FROM maps WHERE id = ?';
     db.query(checkMapQuery, [req.params.id], (err, mapResults) => {
@@ -340,18 +378,18 @@ app.put('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Database error' });
       }
-      
+
       if (mapResults.length === 0) {
         return res.status(404).json({ error: 'Map not found' });
       }
-      
+
       // Update map (only title and description)
       const updateMapQuery = `
         UPDATE maps 
         SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `;
-      
+
       db.query(
         updateMapQuery,
         [
@@ -364,7 +402,7 @@ app.put('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
             console.error('Database error:', err);
             return res.status(500).json({ error: 'Failed to update map' });
           }
-          
+
           // Get updated map
           const getUpdatedQuery = `
             SELECT 
@@ -375,13 +413,13 @@ app.put('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
             LEFT JOIN users u ON m.uploaded_by = u.id
             WHERE m.id = ?
           `;
-          
+
           db.query(getUpdatedQuery, [req.params.id], (err, updatedResults) => {
             if (err) {
               console.error('Database error:', err);
               return res.status(500).json({ error: 'Failed to fetch updated map' });
             }
-            
+
             res.json(updatedResults[0]);
           });
         }
@@ -406,13 +444,13 @@ app.delete('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Database error' });
       }
-      
+
       if (mapResults.length === 0) {
         return res.status(404).json({ error: 'Map not found' });
       }
-      
+
       const filePath = mapResults[0].file_path;
-      
+
       // Delete map from database
       const deleteMapQuery = 'DELETE FROM maps WHERE id = ?';
       db.query(deleteMapQuery, [req.params.id], (err) => {
@@ -420,7 +458,7 @@ app.delete('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Failed to delete map' });
         }
-        
+
         // Delete the file
         if (filePath) {
           const fullPath = path.join(__dirname, '..', filePath);
@@ -428,7 +466,7 @@ app.delete('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
             fs.unlinkSync(fullPath);
           }
         }
-        
+
         res.json({ message: 'Map deleted successfully' });
       });
     });
@@ -454,13 +492,13 @@ app.get('/api/maps/stats', verifyTokenAndApproval, (req, res) => {
       ) as last_uploader
     FROM maps
   `;
-  
+
   db.query(statsQuery, (err, results) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Failed to fetch map statistics' });
     }
-    
+
     res.json(results[0] || {
       total_maps: 0,
       total_size: 0,
@@ -477,31 +515,18 @@ app.get('/api/maps/stats', verifyTokenAndApproval, (req, res) => {
 const createUploadsDir = () => {
   const uploadsDir = path.join(__dirname, '../uploads');
   const idPhotosDir = path.join(uploadsDir, 'id-photos');
-  
+
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
   if (!fs.existsSync(idPhotosDir)) {
     fs.mkdirSync(idPhotosDir, { recursive: true });
   }
-  
+
   console.log('Upload directories ready');
 };
 
 createUploadsDir();
-
-
-// Connect to MySQL
-db.connect((err) => {
-  if (err) {
-    console.error('Error connecting to MySQL:', err);
-    process.exit(1);
-  }
-  console.log('Connected to MySQL database');
-  
-  // Initialize database tables
-//   initializeDatabase();
-});
 
 // // Initialize Database Tables
 // function initializeDatabase() {
@@ -550,8 +575,8 @@ db.connect((err) => {
 
 // Routes
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     message: 'Server is running',
     database: 'MySQL Connected'
   });
@@ -580,31 +605,31 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
 
     // Required fields validation
     if (!name || !phone_number || !password || !national_id) {
-      return res.status(400).json({ 
-        error: 'Please provide name, phone number, national ID, and password' 
+      return res.status(400).json({
+        error: 'Please provide name, phone number, national ID, and password'
       });
     }
 
     // Password validation
     if (password.length < 6) {
-      return res.status(400).json({ 
-        error: 'Password must be at least 6 characters long' 
+      return res.status(400).json({
+        error: 'Password must be at least 6 characters long'
       });
     }
 
     // National ID validation (10 digits)
     const nationalIdRegex = /^\d{10}$/;
     if (!nationalIdRegex.test(national_id)) {
-      return res.status(400).json({ 
-        error: 'National ID must be 10 digits' 
+      return res.status(400).json({
+        error: 'National ID must be 10 digits'
       });
     }
 
     // Phone number validation (basic)
     const phoneRegex = /^09\d{9}$/;
     if (!phoneRegex.test(phone_number)) {
-      return res.status(400).json({ 
-        error: 'Phone number must be 11 digits starting with 09' 
+      return res.status(400).json({
+        error: 'Phone number must be 11 digits starting with 09'
       });
     }
 
@@ -613,25 +638,25 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
     if (date_of_birth) {
       parsedDateOfBirth = new Date(date_of_birth);
       if (isNaN(parsedDateOfBirth.getTime())) {
-        return res.status(400).json({ 
-          error: 'Invalid date of birth format' 
+        return res.status(400).json({
+          error: 'Invalid date of birth format'
         });
       }
-      
+
       // Check if user is at least 18 years old
       const eighteenYearsAgo = new Date();
       eighteenYearsAgo.setFullYear(eighteenYearsAgo.getFullYear() - 18);
       if (parsedDateOfBirth > eighteenYearsAgo) {
-        return res.status(400).json({ 
-          error: 'User must be at least 18 years old' 
+        return res.status(400).json({
+          error: 'User must be at least 18 years old'
         });
       }
     }
 
     // ID Photo validation
     if (!req.file) {
-      return res.status(400).json({ 
-        error: 'ID photo is required' 
+      return res.status(400).json({
+        error: 'ID photo is required'
       });
     }
 
@@ -646,7 +671,7 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
       if (results.length > 0) {
         const existingUser = results[0];
         let errorMsg = 'User already exists with ';
-        
+
         if (existingUser.name === name) {
           errorMsg += 'this username';
         } else if (existingUser.phone_number === phone_number) {
@@ -654,7 +679,7 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
         } else {
           errorMsg += 'this national ID';
         }
-        
+
         return res.status(400).json({ error: errorMsg });
       }
 
@@ -698,21 +723,21 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
         (err, result) => {
           if (err) {
             console.error('Error creating user:', err);
-            
+
             // Clean up uploaded file if DB insert fails
             if (req.file) {
               fs.unlinkSync(req.file.path);
             }
-            
+
             return res.status(500).json({ error: 'Error creating user' });
           }
 
           // Create JWT token (but user is not approved yet)
           const token = jwt.sign(
-            { 
-              id: result.insertId, 
+            {
+              id: result.insertId,
               name: name,
-              approved: false 
+              approved: false
             },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_EXPIRES_IN }
@@ -735,15 +760,15 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    
+
     // Clean up uploaded file on error
     if (req.file) {
       fs.unlinkSync(req.file.path);
     }
-    
-    res.status(500).json({ 
+
+    res.status(500).json({
       error: 'Server error during registration',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -755,8 +780,8 @@ app.post('/api/auth/login', (req, res) => {
     const { name, password } = req.body;
 
     if (!name || !password) {
-      return res.status(400).json({ 
-        error: 'Please provide name and password' 
+      return res.status(400).json({
+        error: 'Please provide name and password'
       });
     }
 
@@ -774,11 +799,11 @@ app.post('/api/auth/login', (req, res) => {
       const user = results[0];
 
       // Check if user is approved
-    //   if (!user.approved) {
-    //     return res.status(403).json({ 
-    //       error: 'Account pending approval. Please wait for admin approval.' 
-    //     });
-    //   }
+      //   if (!user.approved) {
+      //     return res.status(403).json({ 
+      //       error: 'Account pending approval. Please wait for admin approval.' 
+      //     });
+      //   }
 
       // Check password
       const validPassword = await bcrypt.compare(password, user.password);
@@ -788,10 +813,10 @@ app.post('/api/auth/login', (req, res) => {
 
       // Create JWT token with approval status
       const token = jwt.sign(
-        { 
-          id: user.id, 
+        {
+          id: user.id,
           name: user.name,
-          approved: user.approved 
+          approved: user.approved
         },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN }
@@ -821,7 +846,7 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/auth/me', verifyTokenAndApproval, (req, res) => {
   // Allow users to check their status even if not approved
   const findUserQuery = 'SELECT id, name, phone_number, approved, approved_at, is_admin FROM users WHERE id = ?';
-  
+
   db.query(findUserQuery, [req.user.id], (err, results) => {
     if (err) {
       console.error('Database error:', err);
@@ -831,7 +856,7 @@ app.get('/api/auth/me', verifyTokenAndApproval, (req, res) => {
     if (results.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json({ user: results[0] });
   });
 });
@@ -847,7 +872,7 @@ app.get('/api/customers', verifyTokenAndApproval, (req, res) => {
     WHERE c.user_id = ? 
     ORDER BY c.created_at DESC
   `;
-  
+
   db.query(getCustomersQuery, [req.user.id], (err, results) => {
     if (err) {
       console.error('Database error:', err);
@@ -864,17 +889,17 @@ app.get('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
     JOIN users u ON c.user_id = u.id
     WHERE c.id = ? AND c.user_id = ?
   `;
-  
+
   db.query(getCustomerQuery, [req.params.id, req.user.id], (err, results) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Failed to fetch customer' });
     }
-    
+
     if (results.length === 0) {
       return res.status(404).json({ error: 'Customer not found' });
     }
-    
+
     res.json(results[0]);
   });
 });
@@ -882,36 +907,36 @@ app.get('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
 // Create new customer (with user_id and creator_name)
 
 app.post('/api/customers', verifyTokenAndApproval, (req, res) => {
-  const { 
-    name, 
-    budget, 
-    contact, 
-    isLocal, 
-    demands, 
-    previousDeal, 
+  const {
+    name,
+    budget,
+    contact,
+    isLocal,
+    demands,
+    previousDeal,
     notes,
     estate_type  // NEW FIELD
   } = req.body;
-  
+
   if (!name) {
     return res.status(400).json({ error: 'Name is required' });
   }
-  
+
   // First get the user's name to store as creator
   const getUserQuery = 'SELECT name FROM users WHERE id = ?';
-  
+
   db.query(getUserQuery, [req.user.id], (err, userResults) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Failed to fetch user data' });
     }
-    
+
     if (userResults.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     const creatorName = userResults[0].name;
-    
+
     const insertCustomerQuery = `
       INSERT INTO customers 
       (
@@ -920,7 +945,7 @@ app.post('/api/customers', verifyTokenAndApproval, (req, res) => {
       ) 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
-    
+
     db.query(
       insertCustomerQuery,
       [
@@ -940,7 +965,7 @@ app.post('/api/customers', verifyTokenAndApproval, (req, res) => {
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Failed to create customer' });
         }
-        
+
         // Get the created customer
         const getCustomerQuery = `
           SELECT c.*, u.name as creator_name 
@@ -953,7 +978,7 @@ app.post('/api/customers', verifyTokenAndApproval, (req, res) => {
             console.error('Database error:', err);
             return res.status(500).json({ error: 'Failed to fetch created customer' });
           }
-          
+
           res.status(201).json(results[0]);
         });
       }
@@ -961,24 +986,23 @@ app.post('/api/customers', verifyTokenAndApproval, (req, res) => {
   });
 });
 
-
 // Update customer (user-specific)
 app.put('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
-  const { 
-    name, 
-    budget, 
-    contact, 
-    isLocal, 
-    demands, 
-    previousDeal, 
+  const {
+    name,
+    budget,
+    contact,
+    isLocal,
+    demands,
+    previousDeal,
     notes,
     estate_type  // NEW FIELD
   } = req.body;
-  
+
   if (!name) {
     return res.status(400).json({ error: 'Name is required' });
   }
-  
+
   // First check if customer belongs to user
   const checkCustomerQuery = 'SELECT * FROM customers WHERE id = ? AND user_id = ?';
   db.query(checkCustomerQuery, [req.params.id, req.user.id], (err, results) => {
@@ -986,11 +1010,11 @@ app.put('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
-    
+
     if (results.length === 0) {
       return res.status(404).json({ error: 'Customer not found' });
     }
-    
+
     // Update customer with estate_type
     const updateCustomerQuery = `
       UPDATE customers 
@@ -1005,7 +1029,7 @@ app.put('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
         estate_type = ?
       WHERE id = ? AND user_id = ?
     `;
-    
+
     db.query(
       updateCustomerQuery,
       [
@@ -1025,7 +1049,7 @@ app.put('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Failed to update customer' });
         }
-        
+
         // Get updated customer
         const getUpdatedQuery = `
           SELECT c.*, u.name as creator_name 
@@ -1038,7 +1062,7 @@ app.put('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
             console.error('Database error:', err);
             return res.status(500).json({ error: 'Failed to fetch updated customer' });
           }
-          
+
           res.json(updatedResults[0]);
         });
       }
@@ -1054,11 +1078,11 @@ app.delete('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
-    
+
     if (results.length === 0) {
       return res.status(404).json({ error: 'Customer not found' });
     }
-    
+
     // Delete customer
     const deleteCustomerQuery = 'DELETE FROM customers WHERE id = ? AND user_id = ?';
     db.query(deleteCustomerQuery, [req.params.id, req.user.id], (err) => {
@@ -1066,23 +1090,376 @@ app.delete('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Failed to delete customer' });
       }
-      
+
       res.json({ message: 'Customer deleted successfully' });
     });
   });
 });
+
+app.get('/api/estates', verifyTokenAndApproval, (req, res) => {
+  const getEstateQuery = `
+    SELECT e.*, u.name as creator_name 
+    FROM estates e
+    JOIN users u ON e.user_id = u.id
+    WHERE e.user_id = ? 
+    ORDER BY e.created_at DESC
+  `;
+
+  db.query(getEstateQuery, [req.user.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch estates' });
+    }
+    res.json(results);
+  });
+})
+
+app.get('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
+  const getEstateQuery = `
+    SELECT e.*, u.name as creator_name 
+    FROM estate e
+    JOIN users u ON e.user_id = u.id
+    WHERE e.id = ? AND e.user_id = ?
+  `;
+
+  db.query(getEstateQuery, [req.params.id, req.user.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch customer' });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    res.json(results[0]);
+  });
+})
+
+app.post('/api/estates', verifyTokenAndApproval, (req, res) => {
+
+  const {
+    phase,
+    project,
+    block,
+    floor,
+    area,
+    rooms,
+    deed_type,
+    total_floors,
+    total_units_per_floor,
+    occupancy_status,
+    notes,
+    estate_type,
+    phone_number,
+    price,
+    features
+  } = req.body
+  // const features = {}
+
+  // return res.status(200).json({ error: 'DONE OK' });
+
+  if (!phase) {
+    return res.status(400).json({ error: 'Phase is required' });
+  }
+  if (!phase || phase < 0) {
+    return res.status(400).json({ error: 'Phase can not be less than zero' });
+  }
+
+  if (!project || project.length <= 0) {
+    return res.status(400).json({ error: 'Project can not be empty' });
+  }
+
+  if (!floor || floor < 0) {
+    return res.status(400).json({ error: 'Floor must be a non-negative integer' });
+  }
+
+  if (!area || area < 0) {
+    return res.status(400).json({ error: 'Area must be a non-negative integer' });
+  }
+
+  if (!rooms || rooms < 0) {
+    return res.status(400).json({ error: 'Rooms must be a non-negative integer' });
+  }
+
+  if (!deed_type || deed_type.length <= 0) {
+    return res.status(400).json({ error: 'Deed type is required' });
+  }
+
+  if (!total_floors) {
+    return res.status(400).json({ error: 'Total floors must be a non-negative integer' });
+  }
+
+  if (!total_units_per_floor || total_units_per_floor <= 0) {
+    return res.status(400).json({ error: 'Floor must be an Integer more than zero' });
+  }
+
+  if (!occupancy_status || occupancy_status.length <= 0) {
+    return res.status(400).json({ error: 'Occupancy status is required' });
+  }
+
+  if (!estate_type || estate_type.length <= 0) {
+    return res.status(400).json({ error: 'Estate type is required' });
+  }
+
+  const phoneRegex = /^09\d{9}$/;
+  if (!phoneRegex.test(phone_number)) {
+    return res.status(400).json({
+      error: 'Phone number must be 11 digits starting with 09'
+    });
+  }
+
+  if (!price || price < 0) {
+    return res.status(400).json({ error: 'Price must be a non-negative integer' });
+  }
+
+  // First get the user's name to store as creator
+  const getUserQuery = 'SELECT name FROM users WHERE id = ?';
+
+  db.query(getUserQuery, [req.user.id], (err, userResults) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch user data' });
+    }
+
+    if (userResults.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const creatorName = userResults[0].name;
+
+    const insertEstateQuery = `
+      INSERT INTO estates 
+      (
+        user_id, phase, floor, area, rooms, 
+        notes, phone_number, price, project,
+        estate_type, block, deed_type, occupancy_status,
+        total_floors, units_per_floor, features
+      ) 
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `;
+
+    db.query(
+      insertEstateQuery,
+      [
+        req.user.id,
+        phase,
+        floor,
+        area,
+        rooms,
+        notes,
+        phone_number,
+        price,
+        project,
+        estate_type,
+        block,
+        deed_type,
+        occupancy_status,
+        total_floors,
+        total_units_per_floor,
+        JSON.stringify(features)
+      ],
+      (err, result) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to create estate' });
+        }
+
+        // Get the created estate
+        const getEstateQuery = `
+          SELECT e.*, u.name as creator_name 
+          FROM estates e
+          JOIN users u ON e.user_id = u.id
+          WHERE e.id = ?
+        `;
+        db.query(getEstateQuery, [result.insertId], (err, results) => {
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Failed to fetch created estate' });
+          }
+          res.status(201).json(results[0]);
+        });
+      }
+    );
+  });
+})
+
+app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
+  const {
+    estate_type,
+    phase,
+    project,
+    block,
+    floor,
+    area,
+    rooms,
+    features,
+    notes,
+    phone_number,
+    price,
+  } = req.body;
+
+
+
+  if (!phase) {
+    if (phase < 0) {
+      return res.status(400).json({ error: 'Phase can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Phase is required' });
+  }
+
+  if (!block || block.length <= 0) {
+    return res.status(400).json({ error: 'Block is required' });
+  }
+
+  if (!floor) {
+    if (floor < 0) {
+      return res.status(400).json({ error: 'Floor can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Floor is required' });
+  }
+
+  if (!area) {
+    if (area <= 0) {
+      return res.status(400).json({ error: 'Area can not be zero or less' });
+    }
+    return res.status(400).json({ error: 'Area is required' });
+  }
+
+  if (!rooms) {
+    if (rooms < 0) {
+      return res.status(400).json({ error: 'Rooms can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Rooms is required' });
+  }
+
+  const phoneRegex = /^09\d{9}$/;
+  if (!phoneRegex.test(phone_number)) {
+    return res.status(400).json({
+      error: 'Phone number must be 11 digits starting with 09'
+    });
+  }
+
+  if (!price) {
+    if (price < 0) {
+      return res.status(400).json({ error: 'Price can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Price is required' });
+  }
+
+  if (!project || project.length <= 0) {
+    return res.status(400).json({ error: 'Project is required' });
+  }
+
+  if (!estate_type || estate_type.length <= 0) {
+    return res.status(400).json({ error: 'Estate type is required' });
+  }
+
+  const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
+  db.query(checkEstateQuery, [req.params.id, req.user.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Estate not found' });
+    }
+
+    const updateEstateQuery = `
+      UPDATE estates
+      SET 
+        estate_type = ?
+        phase = ?
+        project = ?
+        block = ?
+        floor = ?
+        area = ?
+        rooms = ?
+        features = ?
+        notes = ?
+        phone_number = ?
+        price = ?
+      WHERE id = ? AND user_id = ?
+    `;
+
+    db.query(
+      updateEstateQuery,
+      [
+        estate_type || results[0].estate_type,
+        phase || results[0].phase,
+        project || results[0].project,
+        block || results[0].block,
+        floor || results[0].floor,
+        area || results[0].area,
+        rooms || results[0].rooms,
+        features || results[0].features,
+        notes || results[0].notes,
+        phone_number || results[0].phone_number,
+        price || results[0].price
+      ], (err) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to update customer' });
+        }
+
+        // Get updated customer
+        const getUpdatedQuery = `
+          SELECT e.*, u.name as creator_name 
+          FROM customers e
+          JOIN users u ON e.user_id = u.id
+          WHERE e.id = ?
+        `;
+        db.query(getUpdatedQuery, [req.params.id], (err, updatedResults) => {
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Failed to fetch updated customer' });
+          }
+          res.json(updatedResults[0]);
+        });
+      }
+    )
+  })
+})
+app.delete('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
+  // First check if customer belongs to user
+  const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
+  db.query(checkEstateQuery, [req.params.id, req.user.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Estate not found' });
+    }
+
+    // Delete Estate
+    const deleteEstateQuery = 'DELETE FROM estates WHERE id = ? AND user_id = ?';
+    db.query(deleteEstateQuery, [req.params.id, req.user.id], (err) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to delete Estate' });
+      }
+
+      res.json({ message: 'Estate deleted successfully' });
+    });
+  });
+})
+
+
 
 // Admin routes
 // Admin only: Get all pending users
 app.get('/api/admin/pending-users', verifyTokenAndApproval, (req, res) => {
   // Check if user is admin (you need to add admin field to users table)
   const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
-  
+
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
-    
+
     const getPendingUsersQuery = `
       SELECT 
         id, name, phone_number, national_id, fathers_name, 
@@ -1091,7 +1468,7 @@ app.get('/api/admin/pending-users', verifyTokenAndApproval, (req, res) => {
       WHERE approved = 0 
       ORDER BY created_at DESC
     `;
-    
+
     db.query(getPendingUsersQuery, (err, results) => {
       if (err) {
         console.error('Database error:', err);
@@ -1105,24 +1482,24 @@ app.get('/api/admin/pending-users', verifyTokenAndApproval, (req, res) => {
 // Admin only: Approve user
 app.post('/api/admin/approve-user/:userId', verifyTokenAndApproval, (req, res) => {
   const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
-  
+
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
-    
+
     const approveUserQuery = `
       UPDATE users 
       SET approved = 1, approved_at = CURRENT_TIMESTAMP 
       WHERE id = ?
     `;
-    
+
     db.query(approveUserQuery, [req.params.userId], (err) => {
       if (err) {
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Failed to approve user' });
       }
-      
+
       res.json({ message: 'User approved successfully' });
     });
   });
@@ -1131,12 +1508,12 @@ app.post('/api/admin/approve-user/:userId', verifyTokenAndApproval, (req, res) =
 // Admin only: Reject user (delete)
 app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) => {
   const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
-  
+
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
-    
+
     // First get user to delete their ID photo
     const getUserQuery = 'SELECT id_photo_path FROM users WHERE id = ?';
     db.query(getUserQuery, [req.params.userId], (err, userResults) => {
@@ -1144,7 +1521,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Failed to fetch user' });
       }
-      
+
       // Delete ID photo file
       if (userResults[0]?.id_photo_path) {
         const photoPath = path.join(__dirname, '..', userResults[0].id_photo_path);
@@ -1152,7 +1529,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
           fs.unlinkSync(photoPath);
         }
       }
-      
+
       // Delete user
       const deleteUserQuery = 'DELETE FROM users WHERE id = ?';
       db.query(deleteUserQuery, [req.params.userId], (err) => {
@@ -1160,7 +1537,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Failed to reject user' });
         }
-        
+
         res.json({ message: 'User rejected and removed successfully' });
       });
     });
@@ -1170,12 +1547,12 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
 // Get user by ID (admin only or self)
 app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
   const userId = req.params.id;
-  
+
   // Check if user is requesting their own data or is admin
   if (req.user.id != userId && !req.user.isAdmin) {
     return res.status(403).json({ error: 'Access denied' });
   }
-  
+
   const getUserQuery = `
     SELECT 
       id, name, phone_number, date_of_birth, national_id, fathers_name,
@@ -1185,17 +1562,17 @@ app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
     FROM users 
     WHERE id = ?
   `;
-  
+
   db.query(getUserQuery, [userId], (err, results) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Failed to fetch user' });
     }
-    
+
     if (results.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json(results[0]);
   });
 });
@@ -1203,24 +1580,24 @@ app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
 app.put('/api/users/:id', verifyTokenAndApproval, (req, res) => {
   const userId = req.params.id;
   const { name, phone_number, fathers_name, date_of_birth, primary_residence } = req.body;
-  
+
   // Check if user is updating their own data
   if (req.user.id != userId && !req.user.isAdmin) {
     return res.status(403).json({ error: 'Access denied' });
   }
-  
+
   // Validation
   if (!name || !phone_number) {
     return res.status(400).json({ error: 'Name and phone number are required' });
   }
-  
+
   const updateUserQuery = `
     UPDATE users 
     SET name = ?, phone_number = ?, fathers_name = ?, 
         date_of_birth = ?, primary_residence = ?
     WHERE id = ?
   `;
-  
+
   db.query(
     updateUserQuery,
     [
@@ -1236,7 +1613,7 @@ app.put('/api/users/:id', verifyTokenAndApproval, (req, res) => {
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Failed to update user' });
       }
-      
+
       // Get updated user data
       const getUserQuery = 'SELECT * FROM users WHERE id = ?';
       db.query(getUserQuery, [userId], (err, results) => {
@@ -1244,7 +1621,7 @@ app.put('/api/users/:id', verifyTokenAndApproval, (req, res) => {
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Failed to fetch updated user' });
         }
-        
+
         res.json(results[0]);
       });
     }
@@ -1253,15 +1630,15 @@ app.put('/api/users/:id', verifyTokenAndApproval, (req, res) => {
 
 app.post('/api/auth/change-password', verifyTokenAndApproval, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  
+
   if (!currentPassword || !newPassword) {
     return res.status(400).json({ error: 'Current and new password are required' });
   }
-  
+
   if (newPassword.length < 6) {
     return res.status(400).json({ error: 'New password must be at least 6 characters' });
   }
-  
+
   try {
     // Get current user
     const getUserQuery = 'SELECT * FROM users WHERE id = ?';
@@ -1270,23 +1647,23 @@ app.post('/api/auth/change-password', verifyTokenAndApproval, async (req, res) =
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Database error' });
       }
-      
+
       if (results.length === 0) {
         return res.status(404).json({ error: 'User not found' });
       }
-      
+
       const user = results[0];
-      
+
       // Verify current password
       const validPassword = await bcrypt.compare(currentPassword, user.password);
       if (!validPassword) {
         return res.status(400).json({ error: 'Current password is incorrect' });
       }
-      
+
       // Hash new password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(newPassword, salt);
-      
+
       // Update password
       const updatePasswordQuery = 'UPDATE users SET password = ? WHERE id = ?';
       db.query(updatePasswordQuery, [hashedPassword, req.user.id], (err) => {
@@ -1294,7 +1671,7 @@ app.post('/api/auth/change-password', verifyTokenAndApproval, async (req, res) =
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Failed to update password' });
         }
-        
+
         res.json({ message: 'Password updated successfully' });
       });
     });
@@ -1310,7 +1687,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Serve Vue app in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../frontend/dist')));
-  
+
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../../frontend/dist/index.html'));
   });
