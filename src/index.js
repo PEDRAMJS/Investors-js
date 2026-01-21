@@ -40,6 +40,22 @@ const verifyTokenAndApproval = (req, res, next) => {
   }
 };
 
+const checkIsAdmin = (user_id, callback) => {
+  const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
+  db.query(checkAdminQuery, [user_id], (err, results) => {
+    if (err) {
+      return callback(err, null);
+    }
+
+    if (results.length === 0) {
+      return callback(null, false);
+    }
+
+    const isAdmin = results[0]?.is_admin === 1 || results[0]?.is_admin === true;
+    return callback(null, isAdmin);
+  });
+}
+
 // // MySQL Database Connection
 // const db = mysql.createConnection({
 //   host: process.env.DB_HOST,
@@ -1101,17 +1117,39 @@ app.get('/api/estates', verifyTokenAndApproval, (req, res) => {
     SELECT e.*, u.name as creator_name 
     FROM estates e
     JOIN users u ON e.user_id = u.id
-    WHERE e.user_id = ? 
+    # WHERE e.user_id = ? 
     ORDER BY e.created_at DESC
   `;
 
-  db.query(getEstateQuery, [req.user.id], (err, results) => {
+  checkIsAdmin(req.user.id, (err, is_admin) => {
     if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ error: 'Failed to fetch estates' });
+      return res.status(500).json({ error: 'Database error' });
     }
-    res.json(results);
-  });
+
+
+    if (err) {
+      return res.status(422).json({ error: 'Authorization error' });
+    }
+
+    db.query(getEstateQuery, [req.user.id], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch estates' });
+      }
+
+      if (!is_admin) {
+        results.forEach(estate => {
+          if (estate.user_id != req.user.id) {
+            estate.phone_number = '09*********'
+          }
+        }
+        )
+      }
+
+      res.json(results);
+
+    });
+  })
 })
 
 app.get('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
@@ -1423,18 +1461,19 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
 })
 app.delete('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
   // First check if customer belongs to user
-  const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
-  db.query(checkEstateQuery, [req.params.id, req.user.id], (err, results) => {
+  const checkEstateQuery = 'SELECT is_admin FROM users WHERE id = ?';
+  db.query(checkEstateQuery, [req.user.id], (err, results) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
 
-    if (results.length === 0) {
-      return res.status(404).json({ error: 'Estate not found' });
+    if (!results[0]?.is_admin) {
+      return res.status(422).json({ error: 'Unauthorized' });
     }
 
     // Delete Estate
+
     const deleteEstateQuery = 'DELETE FROM estates WHERE id = ? AND user_id = ?';
     db.query(deleteEstateQuery, [req.params.id, req.user.id], (err) => {
       if (err) {
