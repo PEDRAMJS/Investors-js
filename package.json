@@ -4,8 +4,8 @@
   "description": "Express backend for customer management",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "start": "node main.js",
+    "dev": "nodemon main.js"
   },
   "dependencies": {
     "@prisma/client": "^7.2.0",

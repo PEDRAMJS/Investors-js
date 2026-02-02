@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: ['http://94.182.92.245', 'http://localhost:5173'],
+  origin: ['http://94.182.92.245', 'http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -251,7 +251,7 @@ const mapsFileFilter = (req, file, cb) => {
 const uploadMap = multer({
   storage: mapsStorage,
   fileFilter: mapsFileFilter,
-  limits: { fileSize: 20 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
 });
 
 // Upload map (Admin only)
@@ -1486,6 +1486,643 @@ app.delete('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
   });
 })
 
+// ========== CONTRACTS ROUTES ==========
+
+// Get all contracts (user-specific or all for admin)
+app.get('/api/contracts', verifyTokenAndApproval, (req, res) => {
+
+
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    let query = '';
+    let params = [];
+
+    if (isAdmin) {
+      // Admin can see all contracts
+      query = `
+        SELECT 
+          c.*,
+          u.name as agent_name,
+          u.phone_number as agent_phone,
+          cust.name as customer_name,
+          cust.contact as customer_phone,
+          e.project as estate_project,
+          e.block as estate_block,
+          e.floor as estate_floor,
+          e.area as estate_area,
+          e.estate_type
+        FROM contracts c
+        JOIN users u ON c.user_id = u.id
+        JOIN customers cust ON c.customer_id = cust.id
+        JOIN estates e ON c.estate_id = e.id
+        ORDER BY c.created_at DESC
+      `;
+    } else {
+      // Regular users can only see their own contracts
+      query = `
+        SELECT 
+          c.*,
+          u.name as agent_name,
+          u.phone_number as agent_phone,
+          cust.name as customer_name,
+          cust.contact as customer_phone,
+          e.project as estate_project,
+          e.block as estate_block,
+          e.floor as estate_floor,
+          e.area as estate_area,
+          e.estate_type
+        FROM contracts c
+        JOIN users u ON c.user_id = u.id
+        JOIN customers cust ON c.customer_id = cust.id
+        JOIN estates e ON c.estate_id = e.id
+        WHERE c.user_id = ?
+        ORDER BY c.created_at DESC
+      `;
+      params = [req.user.id];
+    }
+
+    db.query(query, params, (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch contracts' });
+      }
+      res.json(results);
+    });
+  });
+});
+
+// Get single contract by ID
+app.get('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
+  const contractId = req.params.id;
+
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    let query = '';
+    let params = [];
+
+    if (isAdmin) {
+      query = `
+        SELECT 
+          c.*,
+          u.name as agent_name,
+          u.phone_number as agent_phone,
+          cust.name as customer_name,
+          cust.contact as customer_phone,
+          cust.contact as customer_contact,
+          e.project as estate_project,
+          e.block as estate_block,
+          e.floor as estate_floor,
+          e.area as estate_area,
+          e.rooms as estate_rooms,
+          e.estate_type,
+          e.phone_number as estate_phone,
+          e.price as estate_price
+        FROM contracts c
+        JOIN users u ON c.user_id = u.id
+        JOIN customers cust ON c.customer_id = cust.id
+        JOIN estates e ON c.estate_id = e.id
+        WHERE c.id = ?
+      `;
+      params = [contractId];
+    } else {
+      query = `
+        SELECT 
+          c.*,
+          u.name as agent_name,
+          u.phone_number as agent_phone,
+          cust.name as customer_name,
+          cust.contact as customer_phone,
+          cust.contact as customer_contact,
+          e.project as estate_project,
+          e.block as estate_block,
+          e.floor as estate_floor,
+          e.area as estate_area,
+          e.rooms as estate_rooms,
+          e.estate_type,
+          e.phone_number as estate_phone,
+          e.price as estate_price
+        FROM contracts c
+        JOIN users u ON c.user_id = u.id
+        JOIN customers cust ON c.customer_id = cust.id
+        JOIN estates e ON c.estate_id = e.id
+        WHERE c.id = ? AND c.user_id = ?
+      `;
+      params = [contractId, req.user.id];
+    }
+
+    db.query(query, params, (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch contract' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'Contract not found' });
+      }
+
+      res.json(results[0]);
+    });
+  });
+});
+
+// Get user's customers for dropdown
+app.get('/api/contract/customers', verifyTokenAndApproval, (req, res) => {
+  const query = `
+    SELECT id, name, contact
+    FROM customers 
+    WHERE user_id = ?
+    ORDER BY name
+  `;
+
+  db.query(query, [req.user.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch customers' });
+    }
+    res.json(results);
+  });
+});
+
+// Get user's estates for dropdown
+app.get('/api/contract/estates', verifyTokenAndApproval, (req, res) => {
+
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!isAdmin) {
+      return res.status(422).json({ error: 'Unauthorized' });
+    }
+
+    const query = `
+    SELECT id, project, block, floor, area, rooms, estate_type, price
+    FROM estates 
+    WHERE user_id = ?
+    AND id NOT IN (
+      SELECT estate_id FROM contracts WHERE status = 'فعال'
+    )
+    ORDER BY project, block
+  `;
+
+    db.query(query, [req.user.id], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch estates' });
+      }
+      console.log(results);
+      res.json(results);
+    });
+
+  })
+
+});
+
+// Generate unique contract number
+const generateContractNumber = () => {
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 1000);
+  return `CON-${timestamp}-${random}`;
+};
+
+
+// Configure storage for contracts
+const contractsStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads/contracts');
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename: timestamp-random-originalname
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 10000);
+    const ext = path.extname(file.originalname);
+    const originalName = path.basename(file.originalname, ext);
+    const safeName = originalName.replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+    const filename = `contract_${timestamp}_${random}_${safeName}${ext}`;
+    cb(null, filename);
+  }
+});
+
+// File filter for contracts (images, PDF, zip, rar)
+const contractsFileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|bmp|webp|pdf|zip|rar/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+
+  if (mimetype && extname) {
+    // Check file size (max 5MB)
+    if (file.size > 10 * 1024 * 1024) {
+      cb(new Error('File size exceeds 10MB limit'), false);
+    } else {
+      cb(null, true);
+    }
+  } else {
+    cb(new Error('Only image, PDF, and archive files are allowed'), false);
+  }
+};
+
+// Create upload middleware for contracts
+const uploadContract = multer({
+  storage: contractsStorage,
+  fileFilter: contractsFileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
+});
+
+app.post('/api/test', uploadContract.array('files'), (req, res) => {
+
+  console.log("req.file = ", req.file);
+
+  console.log("req.files = ", req.files.map((file => file.filename)));
+
+  console.log("Attachment example:", JSON.stringify(req.files.map(file => `/uploads/contracts/${file.filename}`)));
+
+
+  res.status(200).json({
+    message: 'DONE OK'
+  })
+
+})
+
+
+// Create new contract
+app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files'), (req, res) => {
+  const {
+    customer_id,
+    estate_id,
+    contract_type,
+    contract_date,
+    amount,
+    duration_months,
+    payment_method,
+    commission,
+    notes
+  } = req.body;
+
+  // Validation
+  if (!customer_id || !estate_id || !contract_type || !contract_date || !amount) {
+    return res.status(400).json({
+      error: 'لطفا تمامی فیلدهای الزامی را پر کنید'
+    });
+  }
+
+  // Validate contract date
+  const contractDate = new Date(contract_date);
+  if (isNaN(contractDate.getTime())) {
+    return res.status(400).json({ error: 'تاریخ قرارداد نامعتبر است' });
+  }
+
+  // Check if customer belongs to user
+  const checkCustomerQuery = 'SELECT * FROM customers WHERE id = ? AND user_id = ?';
+  db.query(checkCustomerQuery, [customer_id, req.user.id], (err, customerResults) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (customerResults.length === 0) {
+      return res.status(404).json({ error: 'مشتری یافت نشد یا دسترسی ندارید' });
+    }
+
+    // Check if estate belongs to user
+    const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
+    db.query(checkEstateQuery, [estate_id, req.user.id], (err, estateResults) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (estateResults.length === 0) {
+        return res.status(404).json({ error: 'ملک یافت نشد یا دسترسی ندارید' });
+      }
+
+      // Check if estate already has active contract
+      const checkActiveContractQuery = 'SELECT * FROM contracts WHERE estate_id = ? AND status = "فعال"';
+      db.query(checkActiveContractQuery, [estate_id], (err, activeContracts) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+
+        if (activeContracts.length > 0) {
+          return res.status(400).json({
+            error: 'این ملک قبلاً دارای قرارداد فعال است'
+          });
+        }
+
+        // Generate contract number
+        const contract_number = generateContractNumber();
+
+        const attachments = JSON.stringify(req.files.map(file => `/uploads/contracts/${file.filename}`));
+
+        // Insert contract
+        const insertContractQuery = `
+          INSERT INTO contracts (
+            contract_number, user_id, customer_id, estate_id, 
+            contract_type, contract_date, amount, duration_months,
+            payment_method, commission, notes, status, attachments
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        db.query(
+          insertContractQuery,
+          [
+            contract_number,
+            req.user.id,
+            customer_id,
+            estate_id,
+            contract_type,
+            contractDate.toISOString().split('T')[0],
+            amount,
+            duration_months || null,
+            payment_method || 'نقدی',
+            commission || 0,
+            notes || '',
+            'فعال',
+            attachments
+          ],
+          (err, result) => {
+            if (err) {
+              console.error('Database error:', err);
+              return res.status(500).json({ error: 'Failed to create contract' });
+            }
+
+            // Get the created contract with details
+            const getContractQuery = `
+              SELECT 
+                c.*,
+                u.name as agent_name,
+                u.phone_number as agent_phone,
+                cust.name as customer_name,
+                cust.contact as customer_phone,
+                e.project as estate_project,
+                e.block as estate_block,
+                e.floor as estate_floor,
+                e.area as estate_area,
+                e.estate_type
+              FROM contracts c
+              JOIN users u ON c.user_id = u.id
+              JOIN customers cust ON c.customer_id = cust.id
+              JOIN estates e ON c.estate_id = e.id
+              WHERE c.id = ?
+            `;
+
+            db.query(getContractQuery, [result.insertId], (err, contractResults) => {
+              if (err) {
+                console.error('Database error:', err);
+                return res.status(201).json({
+                  id: result.insertId,
+                  contract_number,
+                  message: 'قرارداد با موفقیت ایجاد شد'
+                });
+              }
+
+              res.status(201).json(contractResults[0]);
+            });
+          }
+        );
+      });
+    });
+  });
+});
+
+// Update contract
+app.put('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
+  const contractId = req.params.id;
+  const {
+    contract_type,
+    contract_date,
+    amount,
+    duration_months,
+    payment_method,
+    commission,
+    status,
+    notes
+  } = req.body;
+
+  // First check if contract belongs to user (or user is admin)
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    let checkQuery = '';
+    let checkParams = [];
+
+    if (isAdmin) {
+      checkQuery = 'SELECT * FROM contracts WHERE id = ?';
+      checkParams = [contractId];
+    } else {
+      checkQuery = 'SELECT * FROM contracts WHERE id = ? AND user_id = ?';
+      checkParams = [contractId, req.user.id];
+    }
+
+    db.query(checkQuery, checkParams, (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'قرارداد یافت نشد یا دسترسی ندارید' });
+      }
+
+      const currentContract = results[0];
+
+      // Validate contract date if provided
+      let contractDate = currentContract.contract_date;
+      if (contract_date) {
+        const newDate = new Date(contract_date);
+        if (isNaN(newDate.getTime())) {
+          return res.status(400).json({ error: 'تاریخ قرارداد نامعتبر است' });
+        }
+        contractDate = newDate.toISOString().split('T')[0];
+      }
+
+      // Update contract
+      const updateContractQuery = `
+        UPDATE contracts 
+        SET 
+          contract_type = ?,
+          contract_date = ?,
+          amount = ?,
+          duration_months = ?,
+          payment_method = ?,
+          commission = ?,
+          status = ?,
+          notes = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `;
+
+      db.query(
+        updateContractQuery,
+        [
+          contract_type || currentContract.contract_type,
+          contractDate,
+          amount || currentContract.amount,
+          duration_months !== undefined ? duration_months : currentContract.duration_months,
+          payment_method || currentContract.payment_method,
+          commission !== undefined ? commission : currentContract.commission,
+          status || currentContract.status,
+          notes || currentContract.notes,
+          contractId
+        ],
+        (err) => {
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Failed to update contract' });
+          }
+
+          // Get updated contract
+          const getUpdatedQuery = `
+            SELECT 
+              c.*,
+              u.name as agent_name,
+              u.phone_number as agent_phone,
+              cust.name as customer_name,
+              cust.contact as customer_phone,
+              e.project as estate_project,
+              e.block as estate_block,
+              e.floor as estate_floor,
+              e.area as estate_area,
+              e.estate_type
+            FROM contracts c
+            JOIN users u ON c.user_id = u.id
+            JOIN customers cust ON c.customer_id = cust.id
+            JOIN estates e ON c.estate_id = e.id
+            WHERE c.id = ?
+          `;
+
+          db.query(getUpdatedQuery, [contractId], (err, updatedResults) => {
+            if (err) {
+              console.error('Database error:', err);
+              return res.status(500).json({ error: 'Failed to fetch updated contract' });
+            }
+
+            res.json(updatedResults[0]);
+          });
+        }
+      );
+    });
+  });
+});
+
+// Delete contract (admin only)
+app.delete('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
+  // Check if user is admin
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err || !isAdmin) {
+      return res.status(403).json({ error: 'دسترسی ادمین مورد نیاز است' });
+    }
+
+    // First check if contract exists
+    const checkQuery = 'SELECT * FROM contracts WHERE id = ?';
+    db.query(checkQuery, [req.params.id], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'قرارداد یافت نشد' });
+      }
+
+      // Delete contract
+      const deleteQuery = 'DELETE FROM contracts WHERE id = ?';
+      db.query(deleteQuery, [req.params.id], (err) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to delete contract' });
+        }
+
+        res.json({ message: 'قرارداد با موفقیت حذف شد' });
+      });
+    });
+  });
+});
+
+// Get contracts statistics
+app.get('/api/contracts/stats', verifyTokenAndApproval, (req, res) => {
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    let statsQuery = '';
+    let params = [];
+
+    if (isAdmin) {
+      statsQuery = `
+        SELECT 
+          COUNT(*) as total_contracts,
+          SUM(amount) as total_amount,
+          AVG(amount) as average_amount,
+          SUM(commission) as total_commission,
+          COUNT(CASE WHEN status = 'فعال' THEN 1 END) as active_contracts,
+          COUNT(CASE WHEN status = 'منقضی' THEN 1 END) as expired_contracts,
+          COUNT(CASE WHEN MONTH(contract_date) = MONTH(CURRENT_DATE()) 
+                    AND YEAR(contract_date) = YEAR(CURRENT_DATE()) 
+                    THEN 1 END) as this_month,
+          MAX(contract_date) as latest_contract_date
+        FROM contracts
+      `;
+    } else {
+      statsQuery = `
+        SELECT 
+          COUNT(*) as total_contracts,
+          SUM(amount) as total_amount,
+          AVG(amount) as average_amount,
+          SUM(commission) as total_commission,
+          COUNT(CASE WHEN status = 'فعال' THEN 1 END) as active_contracts,
+          COUNT(CASE WHEN status = 'منقضی' THEN 1 END) as expired_contracts,
+          COUNT(CASE WHEN MONTH(contract_date) = MONTH(CURRENT_DATE()) 
+                    AND YEAR(contract_date) = YEAR(CURRENT_DATE()) 
+                    THEN 1 END) as this_month,
+          MAX(contract_date) as latest_contract_date
+        FROM contracts
+        WHERE user_id = ?
+      `;
+      params = [req.user.id];
+    }
+
+    db.query(statsQuery, params, (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch contract statistics' });
+      }
+
+      res.json(results[0] || {
+        total_contracts: 0,
+        total_amount: 0,
+        average_amount: 0,
+        total_commission: 0,
+        active_contracts: 0,
+        expired_contracts: 0,
+        this_month: 0,
+        latest_contract_date: null
+      });
+    });
+  });
+});
+// ========== END CONTRACTS ROUTES ==========
 
 
 // Admin routes
