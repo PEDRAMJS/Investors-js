@@ -109,7 +109,7 @@ db.getConnection((err) => {
 
 // ========== FILE UPLOAD CONFIGURATION ==========
 // Configure file upload storage
-const storage = multer.diskStorage({
+const idPhotoStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, '../uploads/id-photos');
 
@@ -131,15 +131,15 @@ const storage = multer.diskStorage({
 });
 
 // File filter for images only
-const fileFilter = (req, file, cb) => {
+const idPhotoFileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|bmp|webp/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
 
   if (mimetype && extname) {
     // Check file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      cb(new Error('File size exceeds 2MB limit'), false);
+    if (file.size > 20 * 1024 * 1024) {
+      cb(new Error('File size exceeds 20MB limit'), false);
     } else {
       cb(null, true);
     }
@@ -150,10 +150,11 @@ const fileFilter = (req, file, cb) => {
 
 // Create upload middleware instance
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: { fileSize: 2 * 1024 * 1024 } // 2MB limit
+  storage: idPhotoStorage,
+  fileFilter: idPhotoFileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 } // 2MB limit
 });
+
 // ========== END FILE UPLOAD CONFIG ==========
 
 // ========== MAPS ROUTES ==========
