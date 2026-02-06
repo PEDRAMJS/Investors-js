@@ -7,6 +7,7 @@ const mysql = require('mysql2');
 const multer = require('multer'); // Add this
 const path = require('path');
 const fs = require('fs');
+const { error } = require('console');
 require('dotenv').config();
 
 const app = express();
@@ -28,7 +29,7 @@ const verifyTokenAndApproval = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
   if (!token) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
+    return res.status(401).json({ error: 'Access denied. No token provided.', revoke_auth: true });
   }
 
   try {
@@ -159,53 +160,6 @@ const upload = multer({
 
 // ========== MAPS ROUTES ==========
 
-// Get all maps (public, but requires authentication)
-app.get('/api/maps', verifyTokenAndApproval, (req, res) => {
-  const getMapsQuery = `
-    SELECT 
-      m.*,
-      u.name as uploaded_by_name,
-      u.phone_number as uploaded_by_phone
-    FROM maps m
-    LEFT JOIN users u ON m.uploaded_by = u.id
-    ORDER BY m.created_at DESC
-  `;
-
-  db.query(getMapsQuery, (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ error: 'Failed to fetch maps' });
-    }
-    res.json(results);
-  });
-});
-
-// Get single map by ID
-app.get('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
-  const getMapQuery = `
-    SELECT 
-      m.*,
-      u.name as uploaded_by_name,
-      u.phone_number as uploaded_by_phone
-    FROM maps m
-    LEFT JOIN users u ON m.uploaded_by = u.id
-    WHERE m.id = ?
-  `;
-
-  db.query(getMapQuery, [req.params.id], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ error: 'Failed to fetch map' });
-    }
-
-    if (results.length === 0) {
-      return res.status(404).json({ error: 'Map not found' });
-    }
-
-    res.json(results[0]);
-  });
-});
-
 // Configure storage for maps
 const mapsStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -253,6 +207,677 @@ const uploadMap = multer({
   storage: mapsStorage,
   fileFilter: mapsFileFilter,
   limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
+});
+
+// Generate unique contract number
+const generateContractNumber = () => {
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 1000);
+  return `CON-${timestamp}-${random}`;
+};
+
+// Configure storage for contracts
+const contractsStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads/contracts');
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename: timestamp-random-originalname
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 10000);
+    const ext = path.extname(file.originalname);
+    const originalName = path.basename(file.originalname, ext);
+    const safeName = originalName.replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+    const filename = `contract_${timestamp}_${random}_${safeName}${ext}`;
+    cb(null, filename);
+  }
+});
+
+// File filter for contracts (images, PDF, zip, rar)
+const contractsFileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|bmp|webp|pdf|zip|rar/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+
+  if (mimetype && extname) {
+    // Check file size (max 5MB)
+    if (file.size > 10 * 1024 * 1024) {
+      cb(new Error('File size exceeds 10MB limit'), false);
+    } else {
+      cb(null, true);
+    }
+  } else {
+    cb(new Error('Only image, PDF, and archive files are allowed'), false);
+  }
+};
+
+// Create upload middleware for contracts
+const uploadContract = multer({
+  storage: contractsStorage,
+  fileFilter: contractsFileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
+});
+
+const invoicesStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads/invoices');
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename: timestamp-random-originalname
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 10000);
+    const ext = path.extname(file.originalname);
+    const originalName = path.basename(file.originalname, ext);
+    const safeName = originalName.replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+    const filename = `contract_${timestamp}_${random}_${safeName}${ext}`;
+    cb(null, filename);
+  }
+});
+
+// File filter for contracts (images, PDF, zip, rar)
+const invoicesFileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|bmp|webp|pdf|zip|rar/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+
+  if (mimetype && extname) {
+    // Check file size (max 5MB)
+    if (file.size > 10 * 1024 * 1024) {
+      cb(new Error('File size exceeds 10MB limit'), false);
+    } else {
+      cb(null, true);
+    }
+  } else {
+    cb(new Error('Only image, PDF, and archive files are allowed'), false);
+  }
+};
+
+// Create upload middleware for contracts
+const uploadinvoice = multer({
+  storage: invoicesStorage,
+  fileFilter: invoicesFileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
+});
+
+app.post('/api/invoices', verifyTokenAndApproval, uploadinvoice.single('invoice_photo'), async (req, res) => {
+  try {
+    const { description, amount, units } = req.body;
+    const issued_by = req.user.id; // Assuming user ID comes from authentication middleware
+
+    // Required fields validation
+    if (!description || !amount || !units) {
+      if (req.file) {
+        // Clean up uploaded file if validation fails
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({
+        error: 'Please provide description, amount, and units'
+      });
+    }
+
+    // Amount validation
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({
+        error: 'Amount must be a positive number'
+      });
+    }
+
+    // Units validation
+    const validUnits = ['دلار', 'ریال', 'تومان'];
+    if (!validUnits.includes(units)) {
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({
+        error: 'Invalid unit. Must be one of: دلار, ریال, تومان'
+      });
+    }
+
+    // Invoice photo validation
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'Invoice photo is required'
+      });
+    }
+
+    // Check if user exists
+    const checkUserQuery = 'SELECT id FROM users WHERE id = ?';
+    db.query(checkUserQuery, [issued_by], async (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length === 0) {
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Prepare file path for database
+      const invoicePhotoPath = `/uploads/invoices/${req.file.filename}`;
+
+      // Create invoice
+      const insertInvoiceQuery = `
+        INSERT INTO invoices (
+          uuid, description, issued_by, amount, units, invoice_photo_path
+        ) VALUES (UUID(), ?, ?, ?, ?, ?)
+      `;
+
+      db.query(
+        insertInvoiceQuery,
+        [
+          description,
+          issued_by,
+          amountNum,
+          units,
+          invoicePhotoPath
+        ],
+        (err, result) => {
+          if (err) {
+            console.error('Error creating invoice:', err);
+
+            // Clean up uploaded file if DB insert fails
+            if (req.file) {
+              fs.unlinkSync(req.file.path);
+            }
+
+            return res.status(500).json({
+              error: 'Error creating invoice',
+              details: err.message
+            });
+          }
+
+          // Fetch the created invoice with UUID
+          const getInvoiceQuery = 'SELECT * FROM invoices WHERE id = ?';
+          db.query(getInvoiceQuery, [result.insertId], (err, invoiceResults) => {
+            if (err) {
+              console.error('Error fetching created invoice:', err);
+              // Still return success since invoice was created
+              return res.status(201).json({
+                message: 'Invoice created successfully',
+                invoice_id: result.insertId
+              });
+            }
+
+            res.status(201).json({
+              message: 'Invoice created successfully',
+              invoice: invoiceResults[0]
+            });
+          });
+        }
+      );
+    });
+  } catch (error) {
+    console.error('Invoice creation error:', error);
+
+    // Clean up uploaded file on error
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({
+      error: 'Server error during invoice creation',
+      details: error.message
+    });
+  }
+});
+
+app.get('/api/invoices', verifyTokenAndApproval, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+    const userId = req.query.user_id; // Optional filter by user
+
+    let query = `
+      SELECT 
+        inv.*,
+        usr.name as issued_by_name,
+        usr.phone_number as issued_by_phone
+      FROM invoices inv
+      LEFT JOIN users usr ON inv.issued_by = usr.id
+    `;
+
+    let countQuery = 'SELECT COUNT(*) as total FROM invoices';
+    const queryParams = [];
+    const countParams = [];
+
+    if (userId) {
+      query += ' WHERE inv.issued_by = ?';
+      countQuery += ' WHERE issued_by = ?';
+      queryParams.push(userId);
+      countParams.push(userId);
+    }
+
+    query += ' ORDER BY inv.created_at DESC LIMIT ? OFFSET ?';
+    queryParams.push(limit, offset);
+
+    // Get total count
+    db.query(countQuery, countParams, (err, countResults) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      const total = countResults[0].total;
+      const totalPages = Math.ceil(total / limit);
+
+      // Get invoices
+      db.query(query, queryParams, (err, results) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+
+        res.json({
+          invoices: results,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+          }
+        });
+      });
+    });
+  } catch (error) {
+    console.error('Get invoices error:', error);
+    res.status(500).json({
+      error: 'Server error fetching invoices',
+      details: error.message
+    });
+  }
+});
+
+app.get('/api/invoices/:uuid', verifyTokenAndApproval, async (req, res) => {
+  try {
+    const { uuid } = req.params;
+
+    const query = `
+      SELECT 
+        inv.*,
+        usr.name as issued_by_name,
+        usr.phone_number as issued_by_phone
+      FROM invoices inv
+      LEFT JOIN users usr ON inv.issued_by = usr.id
+      WHERE inv.uuid = ?
+    `;
+
+    db.query(query, [uuid], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      res.json({
+        invoice: results[0]
+      });
+    });
+  } catch (error) {
+    console.error('Get invoice error:', error);
+    res.status(500).json({
+      error: 'Server error fetching invoice',
+      details: error.message
+    });
+  }
+});
+
+app.put('/api/invoices/:uuid', verifyTokenAndApproval, uploadinvoice.single('invoice_photo'), async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const { description, amount, units } = req.body;
+    const userId = req.user.id; // For authorization check
+
+    // Find existing invoice
+    const findInvoiceQuery = 'SELECT * FROM invoices WHERE uuid = ?';
+    db.query(findInvoiceQuery, [uuid], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length === 0) {
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      const existingInvoice = results[0];
+
+      // Authorization check - only creator or admin can update
+      if (existingInvoice.issued_by !== userId && req.user.role !== 'admin') {
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(403).json({ error: 'Not authorized to update this invoice' });
+      }
+
+      // Prepare update data
+      const updateData = {
+        description: description || existingInvoice.description,
+        amount: amount ? parseFloat(amount) : existingInvoice.amount,
+        units: units || existingInvoice.units,
+        updated_at: new Date()
+      };
+
+      // Validate amount if provided
+      if (amount) {
+        const amountNum = parseFloat(amount);
+        if (isNaN(amountNum) || amountNum <= 0) {
+          if (req.file) {
+            fs.unlinkSync(req.file.path);
+          }
+          return res.status(400).json({
+            error: 'Amount must be a positive number'
+          });
+        }
+      }
+
+      // Validate units if provided
+      if (units) {
+        const validUnits = ['دلار', 'ریال', 'تومان'];
+        if (!validUnits.includes(units)) {
+          if (req.file) {
+            fs.unlinkSync(req.file.path);
+          }
+          return res.status(400).json({
+            error: 'Invalid unit. Must be one of: دلار, ریال, تومان'
+          });
+        }
+      }
+
+      // Handle new photo if provided
+      let oldPhotoPath = null;
+      if (req.file) {
+        oldPhotoPath = existingInvoice.invoice_photo_path;
+        updateData.invoice_photo_path = `/uploads/invoices/${req.file.filename}`;
+      }
+
+      // Update invoice
+      const updateQuery = `
+        UPDATE invoices 
+        SET description = ?, amount = ?, units = ?, invoice_photo_path = ?, updated_at = ?
+        WHERE uuid = ?
+      `;
+
+      db.query(
+        updateQuery,
+        [
+          updateData.description,
+          updateData.amount,
+          updateData.units,
+          updateData.invoice_photo_path || existingInvoice.invoice_photo_path,
+          updateData.updated_at,
+          uuid
+        ],
+        (err, result) => {
+          if (err) {
+            console.error('Error updating invoice:', err);
+            if (req.file) {
+              fs.unlinkSync(req.file.path);
+            }
+            return res.status(500).json({
+              error: 'Error updating invoice',
+              details: err.message
+            });
+          }
+
+          // Delete old photo if it was replaced
+          if (oldPhotoPath && req.file) {
+            const oldPhotoFullPath = path.join(__dirname, '..', oldPhotoPath);
+            if (fs.existsSync(oldPhotoFullPath)) {
+              fs.unlinkSync(oldPhotoFullPath);
+            }
+          }
+
+          // Fetch updated invoice
+          db.query(findInvoiceQuery, [uuid], (err, updatedResults) => {
+            if (err) {
+              console.error('Error fetching updated invoice:', err);
+              // Still return success
+              return res.json({
+                message: 'Invoice updated successfully',
+                updated: result.affectedRows > 0
+              });
+            }
+
+            res.json({
+              message: 'Invoice updated successfully',
+              invoice: updatedResults[0]
+            });
+          });
+        }
+      );
+    });
+  } catch (error) {
+    console.error('Update invoice error:', error);
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({
+      error: 'Server error updating invoice',
+      details: error.message
+    });
+  }
+});
+
+app.delete('/api/invoices/:uuid', verifyTokenAndApproval, async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const userId = req.user.id; // For authorization check
+
+    // Find invoice to get photo path and check ownership
+    const findInvoiceQuery = 'SELECT * FROM invoices WHERE uuid = ?';
+    db.query(findInvoiceQuery, [uuid], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      const invoice = results[0];
+
+      // Authorization check - only creator or admin can delete
+      if (invoice.issued_by !== userId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Not authorized to delete this invoice' });
+      }
+
+      // Get photo path before deletion
+      const invoicePhotoPath = invoice.invoice_photo_path;
+
+      // Delete invoice
+      const deleteQuery = 'DELETE FROM invoices WHERE uuid = ?';
+      db.query(deleteQuery, [uuid], (err, result) => {
+        if (err) {
+          console.error('Error deleting invoice:', err);
+          return res.status(500).json({
+            error: 'Error deleting invoice',
+            details: err.message
+          });
+        }
+
+        if (result.affectedRows === 0) {
+          return res.status(404).json({ error: 'Invoice not found' });
+        }
+
+        // Delete associated photo file
+        if (invoicePhotoPath) {
+          const fullPath = path.join(__dirname, '..', invoicePhotoPath);
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+          }
+        }
+
+        res.json({
+          message: 'Invoice deleted successfully',
+          deleted: true
+        });
+      });
+    });
+  } catch (error) {
+    console.error('Delete invoice error:', error);
+    res.status(500).json({
+      error: 'Server error deleting invoice',
+      details: error.message
+    });
+  }
+});
+
+app.get('/api/invoices/stats', verifyTokenAndApproval, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const isAdmin = req.user.role === 'admin';
+
+    let query = `
+            SELECT 
+                COUNT(*) as total_invoices,
+                COALESCE(SUM(amount), 0) as total_amount,
+                COALESCE(AVG(amount), 0) as average_amount,
+                units as top_unit
+            FROM invoices
+        `;
+
+    if (!isAdmin) {
+      query += ' WHERE issued_by = ?';
+    }
+
+    query += ' GROUP BY units ORDER BY COUNT(*) DESC LIMIT 1';
+
+    db.query(query, [!isAdmin ? userId : null].filter(Boolean), (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      const stats = {
+        total_invoices: 0,
+        total_amount: 0,
+        average_amount: 0,
+        top_unit: null
+      };
+
+      if (results.length > 0) {
+        // Get top unit
+        stats.top_unit = results[0].top_unit;
+
+        // Get total stats
+        const totalQuery = `
+                    SELECT 
+                        COUNT(*) as total_invoices,
+                        COALESCE(SUM(amount), 0) as total_amount,
+                        COALESCE(AVG(amount), 0) as average_amount
+                    FROM invoices
+                    ${!isAdmin ? 'WHERE issued_by = ?' : ''}
+                `;
+
+        db.query(totalQuery, [!isAdmin ? userId : null].filter(Boolean), (err, totalResults) => {
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Database error' });
+          }
+
+          if (totalResults.length > 0) {
+            stats.total_invoices = totalResults[0].total_invoices;
+            stats.total_amount = totalResults[0].total_amount;
+            stats.average_amount = totalResults[0].average_amount;
+          }
+
+          res.json(stats);
+        });
+      } else {
+        res.json(stats);
+      }
+    });
+  } catch (error) {
+    console.error('Get stats error:', error);
+    res.status(500).json({
+      error: 'Server error fetching stats',
+      details: error.message
+    });
+  }
+});
+
+// Get all maps (public, but requires authentication)
+app.get('/api/maps', verifyTokenAndApproval, (req, res) => {
+  const getMapsQuery = `
+    SELECT 
+      m.*,
+      u.name as uploaded_by_name,
+      u.phone_number as uploaded_by_phone
+    FROM maps m
+    LEFT JOIN users u ON m.uploaded_by = u.id
+    ORDER BY m.created_at DESC
+  `;
+
+  db.query(getMapsQuery, (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch maps' });
+    }
+    res.json(results);
+  });
+});
+
+// Get single map by ID
+app.get('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
+  const getMapQuery = `
+    SELECT 
+      m.*,
+      u.name as uploaded_by_name,
+      u.phone_number as uploaded_by_phone
+    FROM maps m
+    LEFT JOIN users u ON m.uploaded_by = u.id
+    WHERE m.id = ?
+  `;
+
+  db.query(getMapQuery, [req.params.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch map' });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Map not found' });
+    }
+
+    res.json(results[0]);
+  });
 });
 
 // Upload map (Admin only)
@@ -754,7 +1379,10 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
             {
               id: result.insertId,
               name: name,
-              approved: false
+              approved: false,
+              is_admin: user.is_admin,
+              role: user.role
+
             },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_EXPIRES_IN }
@@ -768,6 +1396,8 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
               name,
               phone_number,
               national_id,
+              is_admin: result[0]?.is_admin || false,
+              role: result[0]?.role,
               approved: false,
               approval_pending: true
             }
@@ -833,7 +1463,9 @@ app.post('/api/auth/login', (req, res) => {
         {
           id: user.id,
           name: user.name,
-          approved: user.approved
+          approved: user.approved,
+          is_admin: user.is_admin,
+          role: user.role
         },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN }
@@ -847,6 +1479,7 @@ app.post('/api/auth/login', (req, res) => {
           name: user.name,
           phone_number: user.phone_number,
           is_admin: user.is_admin,
+          role: user.role,
           approved: user.approved,
           approved_at: user.approved_at,
           created_at: user.created_at,
@@ -1118,7 +1751,7 @@ app.get('/api/estates', verifyTokenAndApproval, (req, res) => {
     SELECT e.*, u.name as creator_name 
     FROM estates e
     JOIN users u ON e.user_id = u.id
-    # WHERE e.user_id = ? 
+    -- WHERE e.user_id = ? 
     ORDER BY e.created_at DESC
   `;
 
@@ -1129,7 +1762,7 @@ app.get('/api/estates', verifyTokenAndApproval, (req, res) => {
 
 
     if (err) {
-      return res.status(422).json({ error: 'Authorization error' });
+      return res.status(401).json({ error: 'Authorization error' });
     }
 
     db.query(getEstateQuery, [req.user.id], (err, results) => {
@@ -1470,7 +2103,7 @@ app.delete('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     }
 
     if (!results[0]?.is_admin) {
-      return res.status(422).json({ error: 'Unauthorized' });
+      return res.status(401).json({ error: 'Unauthorized' });
     }
 
     // Delete Estate
@@ -1594,29 +2227,7 @@ app.get('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
       `;
       params = [contractId];
     } else {
-      query = `
-        SELECT 
-          c.*,
-          u.name as agent_name,
-          u.phone_number as agent_phone,
-          cust.name as customer_name,
-          cust.contact as customer_phone,
-          cust.contact as customer_contact,
-          e.project as estate_project,
-          e.block as estate_block,
-          e.floor as estate_floor,
-          e.area as estate_area,
-          e.rooms as estate_rooms,
-          e.estate_type,
-          e.phone_number as estate_phone,
-          e.price as estate_price
-        FROM contracts c
-        JOIN users u ON c.user_id = u.id
-        JOIN customers cust ON c.customer_id = cust.id
-        JOIN estates e ON c.estate_id = e.id
-        WHERE c.id = ? AND c.user_id = ?
-      `;
-      params = [contractId, req.user.id];
+      res.status(401).json({ error: "Unauthorized" })
     }
 
     db.query(query, params, (err, results) => {
@@ -1629,6 +2240,9 @@ app.get('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
         return res.status(404).json({ error: 'Contract not found' });
       }
 
+      console.log(results[0].attachments);
+
+
       res.json(results[0]);
     });
   });
@@ -1636,10 +2250,15 @@ app.get('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
 
 // Get user's customers for dropdown
 app.get('/api/contract/customers', verifyTokenAndApproval, (req, res) => {
-  const query = `
+
+  if (!req.user.is_admin) {
+    return res.status(401).json({ error: "Unauthorized" })
+  }
+
+  let query = `
     SELECT id, name, contact
     FROM customers 
-    WHERE user_id = ?
+    #WHERE user_id = ?
     ORDER BY name
   `;
 
@@ -1655,109 +2274,49 @@ app.get('/api/contract/customers', verifyTokenAndApproval, (req, res) => {
 // Get user's estates for dropdown
 app.get('/api/contract/estates', verifyTokenAndApproval, (req, res) => {
 
-  checkIsAdmin(req.user.id, (err, isAdmin) => {
+  if (!req.user.is_admin) {
+    return res.status(401).json({ error: "Unauthorized" })
+  }
 
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    if (!isAdmin) {
-      return res.status(422).json({ error: 'Unauthorized' });
-    }
-
-    const query = `
+  const query = `
     SELECT id, project, block, floor, area, rooms, estate_type, price
     FROM estates 
-    WHERE user_id = ?
-    AND id NOT IN (
+    WHERE id NOT IN (
       SELECT estate_id FROM contracts WHERE status = 'فعال'
     )
     ORDER BY project, block
   `;
 
-    db.query(query, [req.user.id], (err, results) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: 'Failed to fetch estates' });
-      }
-      console.log(results);
-      res.json(results);
-    });
-
-  })
-
-});
-
-// Generate unique contract number
-const generateContractNumber = () => {
-  const timestamp = Date.now();
-  const random = Math.floor(Math.random() * 1000);
-  return `CON-${timestamp}-${random}`;
-};
-
-
-// Configure storage for contracts
-const contractsStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../uploads/contracts');
-
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+  db.query(query, [req.user.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch estates' });
     }
-
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    // Generate unique filename: timestamp-random-originalname
-    const timestamp = Date.now();
-    const random = Math.floor(Math.random() * 10000);
-    const ext = path.extname(file.originalname);
-    const originalName = path.basename(file.originalname, ext);
-    const safeName = originalName.replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
-    const filename = `contract_${timestamp}_${random}_${safeName}${ext}`;
-    cb(null, filename);
-  }
+    res.json(results);
+  });
 });
 
-// File filter for contracts (images, PDF, zip, rar)
-const contractsFileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|bmp|webp|pdf|zip|rar/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-
-  if (mimetype && extname) {
-    // Check file size (max 5MB)
-    if (file.size > 10 * 1024 * 1024) {
-      cb(new Error('File size exceeds 10MB limit'), false);
-    } else {
-      cb(null, true);
-    }
-  } else {
-    cb(new Error('Only image, PDF, and archive files are allowed'), false);
-  }
-};
-
-// Create upload middleware for contracts
-const uploadContract = multer({
-  storage: contractsStorage,
-  fileFilter: contractsFileFilter,
-  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
-});
 
 app.post('/api/test', uploadContract.array('files'), (req, res) => {
 
-  console.log("req.file = ", req.file);
+  // console.log(req.body);
 
-  console.log("req.files = ", req.files.map((file => file.filename)));
+  // console.log("req.file = ", req.file);
 
-  console.log("Attachment example:", JSON.stringify(req.files.map(file => `/uploads/contracts/${file.filename}`)));
+  // console.log("req.files = ", req.files.map((file => file.filename)));
 
+  // console.log("Attachment example:", JSON.stringify(req.files.map(file => `/uploads/contracts/${file.filename}`)));
 
-  res.status(200).json({
+  for (let i = 0; i < req.files.length; i++) {
+    const file = req.files[i];
+    req.files.forEach((file) => {
+      fs.unlinkSync(file.path)
+    })
+  }
+
+  res.status(422).json({
     message: 'DONE OK'
   })
-
 })
 
 
@@ -1775,6 +2334,11 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
     notes
   } = req.body;
 
+  // console.log("-----------\nHeaders: ", req.headers);
+  // console.log("-----------\nBody: ", req.body);
+
+
+
   // Validation
   if (!customer_id || !estate_id || !contract_type || !contract_date || !amount) {
     return res.status(400).json({
@@ -1789,8 +2353,8 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
   }
 
   // Check if customer belongs to user
-  const checkCustomerQuery = 'SELECT * FROM customers WHERE id = ? AND user_id = ?';
-  db.query(checkCustomerQuery, [customer_id, req.user.id], (err, customerResults) => {
+  const checkCustomerQuery = 'SELECT * FROM customers WHERE id = ?';
+  db.query(checkCustomerQuery, [customer_id], (err, customerResults) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
@@ -1801,8 +2365,8 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
     }
 
     // Check if estate belongs to user
-    const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
-    db.query(checkEstateQuery, [estate_id, req.user.id], (err, estateResults) => {
+    const checkEstateQuery = 'SELECT * FROM estates WHERE id = ?';
+    db.query(checkEstateQuery, [estate_id], (err, estateResults) => {
       if (err) {
         console.error('Database error:', err);
         return res.status(500).json({ error: 'Database error' });
@@ -1829,7 +2393,20 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
         // Generate contract number
         const contract_number = generateContractNumber();
 
-        const attachments = JSON.stringify(req.files.map(file => `/uploads/contracts/${file.filename}`));
+        let attachments = req.files
+        for (let i = 0; i < attachments.length; i++) {
+          const file = attachments[i];
+
+          file.path = `/uploads/contracts/${file.filename}`
+
+          console.log(attachments);
+        }
+
+        attachments = JSON.stringify(attachments)
+
+        // return res.status(404)
+
+
 
         // Insert contract
         const insertContractQuery = `
@@ -1903,7 +2480,8 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
 });
 
 // Update contract
-app.put('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
+app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('files'), (req, res) => {
+
   const contractId = req.params.id;
   const {
     contract_type,
