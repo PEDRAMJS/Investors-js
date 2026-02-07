@@ -153,7 +153,7 @@ const idPhotoFileFilter = (req, file, cb) => {
 const upload = multer({
   storage: idPhotoStorage,
   fileFilter: idPhotoFileFilter,
-  limits: { fileSize: 20 * 1024 * 1024 } // 2MB limit
+  limits: { fileSize: 50 * 1024 * 1024 } // 2MB limit
 });
 
 // ========== END FILE UPLOAD CONFIG ==========
@@ -759,7 +759,7 @@ app.delete('/api/invoices/:uuid', verifyTokenAndApproval, async (req, res) => {
   }
 });
 
-app.get('/api/invoices/stats', verifyTokenAndApproval, async (req, res) => {
+app.get('/api/invoice/stats', verifyTokenAndApproval, async (req, res) => {
   try {
     const userId = req.user.id;
     const isAdmin = req.user.role === 'admin';
@@ -2831,6 +2831,46 @@ app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
     res.json(results[0]);
   });
 });
+
+app.get('/api/users/', verifyTokenAndApproval, (req, res) => {
+
+  // Check if user is requesting their own data or is admin
+  if (!req.user.isAdmin) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // Parse query parameters
+  const limit = parseInt(req.query.limit) || 10;
+  const offset = parseInt(req.query.offset) || 0;
+
+  // Validate inputs
+  if (limit <= 0 || limit > 100) {
+    return res.status(400).json({ error: 'Limit must be between 1 and 100' });
+  }
+
+  if (offset < 0) {
+    return res.status(400).json({ error: 'Offset cannot be negative' });
+  }
+
+  const getUserQuery = `
+    SELECT
+      id, name, phone_number
+    FROM users
+    ORDER BY id ASC
+    LIMIT ?
+    OFFSET ?
+  `;
+
+  db.query(getUserQuery, [limit, offset], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch users' });
+    }
+
+    res.json(results); // Changed from results[0] to results to return all users in the page
+  });
+});
+
 
 app.put('/api/users/:id', verifyTokenAndApproval, (req, res) => {
   const userId = req.params.id;
