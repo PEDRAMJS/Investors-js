@@ -96,16 +96,16 @@ const db = mysql.createPool({
 
 
 // Connect to MySQL
-db.getConnection((err) => {
-  if (err) {
-    console.error('Error connecting to MySQL:', err);
-    process.exit(1);
-  }
-  console.log('Connected to MySQL database');
+// db.getConnection((err) => {
+//   if (err) {
+//     console.error('Error connecting to MySQL:', err);
+//     process.exit(1);
+//   }
+//   console.log('Connected to MySQL database');
 
-  // Initialize database tables
-  //   initializeDatabase();
-});
+//   // Initialize database tables
+//   //   initializeDatabase();
+// });
 
 
 // ========== FILE UPLOAD CONFIGURATION ==========
@@ -153,7 +153,7 @@ const idPhotoFileFilter = (req, file, cb) => {
 const upload = multer({
   storage: idPhotoStorage,
   fileFilter: idPhotoFileFilter,
-  limits: { fileSize: 20 * 1024 * 1024 } // 2MB limit
+  limits: { fileSize: 50 * 1024 * 1024 } // 2MB limit
 });
 
 // ========== END FILE UPLOAD CONFIG ==========
@@ -759,7 +759,7 @@ app.delete('/api/invoices/:uuid', verifyTokenAndApproval, async (req, res) => {
   }
 });
 
-app.get('/api/invoices/stats', verifyTokenAndApproval, async (req, res) => {
+app.get('/api/invoice/stats', verifyTokenAndApproval, async (req, res) => {
   try {
     const userId = req.user.id;
     const isAdmin = req.user.role === 'admin';
@@ -1515,21 +1515,37 @@ app.get('/api/auth/me', verifyTokenAndApproval, (req, res) => {
 // Get all customers (now user-specific)
 // Get all customers (now with creator name)
 app.get('/api/customers', verifyTokenAndApproval, (req, res) => {
-  const getCustomersQuery = `
+  checkIsAdmin(req.user.id, (err, is_admin) => {
+
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    let getCustomersQuery = `
     SELECT c.*, u.name as creator_name 
     FROM customers c
     JOIN users u ON c.user_id = u.id
-    WHERE c.user_id = ? 
+    WHERE c.user_id = ?
     ORDER BY c.created_at DESC
   `;
 
-  db.query(getCustomersQuery, [req.user.id], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ error: 'Failed to fetch customers' });
+    if (is_admin) {
+      getCustomersQuery = `
+      SELECT c.*, u.name as creator_name 
+      FROM customers c
+      JOIN users u ON c.user_id = u.id
+      ORDER BY c.created_at DESC
+    `;
     }
-    res.json(results);
-  });
+
+    db.query(getCustomersQuery, is_admin ? [] : [req.user.id], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch customers' });
+      }
+      res.json(results);
+    });
+  })
 });
 // Get single customer by ID (user-specific)
 app.get('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
@@ -1761,7 +1777,7 @@ app.get('/api/estates', verifyTokenAndApproval, (req, res) => {
     }
 
 
-    if (err) {
+    if (!is_admin) {
       return res.status(401).json({ error: 'Authorization error' });
     }
 
@@ -2189,65 +2205,6 @@ app.get('/api/contracts', verifyTokenAndApproval, (req, res) => {
   });
 });
 
-// Get single contract by ID
-app.get('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
-  const contractId = req.params.id;
-
-  checkIsAdmin(req.user.id, (err, isAdmin) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    let query = '';
-    let params = [];
-
-    if (isAdmin) {
-      query = `
-        SELECT 
-          c.*,
-          u.name as agent_name,
-          u.phone_number as agent_phone,
-          cust.name as customer_name,
-          cust.contact as customer_phone,
-          cust.contact as customer_contact,
-          e.project as estate_project,
-          e.block as estate_block,
-          e.floor as estate_floor,
-          e.area as estate_area,
-          e.rooms as estate_rooms,
-          e.estate_type,
-          e.phone_number as estate_phone,
-          e.price as estate_price
-        FROM contracts c
-        JOIN users u ON c.user_id = u.id
-        JOIN customers cust ON c.customer_id = cust.id
-        JOIN estates e ON c.estate_id = e.id
-        WHERE c.id = ?
-      `;
-      params = [contractId];
-    } else {
-      res.status(401).json({ error: "Unauthorized" })
-    }
-
-    db.query(query, params, (err, results) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: 'Failed to fetch contract' });
-      }
-
-      if (results.length === 0) {
-        return res.status(404).json({ error: 'Contract not found' });
-      }
-
-      console.log(results[0].attachments);
-
-
-      res.json(results[0]);
-    });
-  });
-});
-
 // Get user's customers for dropdown
 app.get('/api/contract/customers', verifyTokenAndApproval, (req, res) => {
 
@@ -2331,12 +2288,10 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
     duration_months,
     payment_method,
     commission,
-    notes
+    notes,// Now can be array of objects with {user_id, description, role}
   } = req.body;
 
-  // console.log("-----------\nHeaders: ", req.headers);
-  // console.log("-----------\nBody: ", req.body);
-
+  const users = JSON.parse(req.body.users)
 
 
   // Validation
@@ -2350,6 +2305,11 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
   const contractDate = new Date(contract_date);
   if (isNaN(contractDate.getTime())) {
     return res.status(400).json({ error: 'تاریخ قرارداد نامعتبر است' });
+  }
+
+  // Validate users array if provided
+  if (users && !Array.isArray(users)) {
+    return res.status(400).json({ error: 'فیلد users باید آرایه باشد' });
   }
 
   // Check if customer belongs to user
@@ -2396,85 +2356,385 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
         let attachments = req.files
         for (let i = 0; i < attachments.length; i++) {
           const file = attachments[i];
-
-          file.path = `/uploads/contracts/${file.filename}`
-
-          console.log(attachments);
+          file.path = `/uploads/contracts/${file.filename}`;
         }
+        attachments = JSON.stringify(attachments);
 
-        attachments = JSON.stringify(attachments)
+        db.getConnection((err, conn) => {
 
-        // return res.status(404)
+          if (err) {
+            return res.status(500).json({ error: 'Transaction error' });
+          }
+          // Start transaction for atomic operations
 
-
-
-        // Insert contract
-        const insertContractQuery = `
-          INSERT INTO contracts (
-            contract_number, user_id, customer_id, estate_id, 
-            contract_type, contract_date, amount, duration_months,
-            payment_method, commission, notes, status, attachments
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
-
-        db.query(
-          insertContractQuery,
-          [
-            contract_number,
-            req.user.id,
-            customer_id,
-            estate_id,
-            contract_type,
-            contractDate.toISOString().split('T')[0],
-            amount,
-            duration_months || null,
-            payment_method || 'نقدی',
-            commission || 0,
-            notes || '',
-            'فعال',
-            attachments
-          ],
-          (err, result) => {
+          conn.beginTransaction((err) => {
             if (err) {
-              console.error('Database error:', err);
-              return res.status(500).json({ error: 'Failed to create contract' });
+              console.error('Transaction error:', err);
+              return res.status(500).json({ error: 'Transaction error' });
             }
 
-            // Get the created contract with details
-            const getContractQuery = `
-              SELECT 
-                c.*,
-                u.name as agent_name,
-                u.phone_number as agent_phone,
-                cust.name as customer_name,
-                cust.contact as customer_phone,
-                e.project as estate_project,
-                e.block as estate_block,
-                e.floor as estate_floor,
-                e.area as estate_area,
-                e.estate_type
-              FROM contracts c
-              JOIN users u ON c.user_id = u.id
-              JOIN customers cust ON c.customer_id = cust.id
-              JOIN estates e ON c.estate_id = e.id
-              WHERE c.id = ?
-            `;
+            // Insert contract
+            const insertContractQuery = `
+            INSERT INTO contracts (
+              contract_number, user_id, customer_id, estate_id, 
+              contract_type, contract_date, amount, duration_months,
+              payment_method, commission, notes, status, attachments
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
 
-            db.query(getContractQuery, [result.insertId], (err, contractResults) => {
-              if (err) {
-                console.error('Database error:', err);
-                return res.status(201).json({
-                  id: result.insertId,
-                  contract_number,
-                  message: 'قرارداد با موفقیت ایجاد شد'
+            conn.query(
+              insertContractQuery,
+              [
+                contract_number,
+                req.user.id, // Primary user (creator)
+                customer_id,
+                estate_id,
+                contract_type,
+                contractDate.toISOString().split('T')[0],
+                amount,
+                duration_months || null,
+                payment_method || 'نقدی',
+                commission || 0,
+                notes || '',
+                'فعال',
+                attachments
+              ],
+              (err, result) => {
+                if (err) {
+                  return conn.rollback(() => {
+                    console.error('Database error:', err);
+                    res.status(500).json({ error: 'Failed to create contract' });
+                  });
+                }
+
+                const contractId = result.insertId;
+
+                // Handle pivot table entries for multiple users with description
+                const handlePivotTable = (callback) => {
+                  // Always add the creator first
+                  const insertCreatorQuery = `
+                  INSERT INTO contract_users (contract_id, user_id, description, role)
+                  VALUES (?, ?, ?, ?)
+                `;
+
+                  // Add creator with optional description
+                  const creatorDescription = req.body.creator_description || 'سازنده قرارداد';
+
+                  // conn.query(insertCreatorQuery, [
+                  //   contractId,
+                  //   req.user.id,
+                  //   creatorDescription,
+                  //   'creator'
+                  // ], (err) => {});
+                  // if (err) return callback(err);
+
+                  // If no additional users specified, we're done
+                  if (!users || users.length === 0) {
+                    return callback(null);
+                  }
+
+                  // Process additional users
+                  const userValues = users.map(user => {
+                    // Support both object format and simple ID format
+                    let userId, description, role;
+
+                    if (typeof user === 'object' && user !== null) {
+                      userId = user.user_id || user.id;
+                      description = user.description || null;
+                      role = user.role || 'collaborator';
+                    } else {
+                      // Simple ID format
+                      userId = user;
+                      description = null;
+                      role = 'collaborator';
+                    }
+
+                    // Skip if it's the creator (already added)
+                    if (parseInt(userId) === parseInt(req.user.id)) {
+                      return null;
+                    }
+
+                    return [contractId, userId, description, role];
+                  }).filter(value => value !== null); // Remove null entries
+
+                  if (userValues.length === 0) {
+                    return callback(null);
+                  }
+
+                  const insertUsersQuery = `
+                    INSERT INTO contract_users (contract_id, user_id, description, role)
+                    VALUES ?
+                  `;
+
+                  conn.query(insertUsersQuery, [userValues], (err) => {
+                    if (err) return callback(err);
+                    callback(null);
+                  });
+
+                };
+
+                // Insert into pivot table
+                handlePivotTable((err) => {
+
+                  console.log("ERROR: ", err);
+
+
+                  if (err) {
+                    return conn.rollback(() => {
+                      console.error('Database error:', err);
+                      res.status(500).json({ error: 'Failed to add users to contract' });
+                    });
+                  }
+
+                  // Commit transaction
+                  conn.commit((err) => {
+                    if (err) {
+                      return conn.rollback(() => {
+                        console.error('Commit error:', err);
+                        res.status(500).json({ error: 'Transaction failed' });
+                      });
+                    }
+
+                    // Get the created contract with details and users
+                    const getContractQuery = `
+                    SELECT 
+                      c.*,
+                      u.name as agent_name,
+                      u.phone_number as agent_phone,
+                      cust.name as customer_name,
+                      cust.contact as customer_phone,
+                      e.project as estate_project,
+                      e.block as estate_block,
+                      e.floor as estate_floor,
+                      e.area as estate_area,
+                      e.estate_type,
+                      GROUP_CONCAT(
+                        CONCAT(
+                          cu.user_id, ':', 
+                          COALESCE(cu.role, 'collaborator'), ':', 
+                          COALESCE(cu.description, '')
+                        )
+                      ) as user_details
+                    FROM contracts c
+                    JOIN users u ON c.user_id = u.id
+                    JOIN customers cust ON c.customer_id = cust.id
+                    JOIN estates e ON c.estate_id = e.id
+                    LEFT JOIN contract_users cu ON c.id = cu.contract_id
+                    WHERE c.id = ?
+                    GROUP BY c.id
+                  `;
+
+                    conn.query(getContractQuery, [contractId], (err, contractResults) => {
+                      if (err) {
+                        console.error('Database error:', err);
+                        // Still return success since contract was created
+                        return res.status(201).json({
+                          id: contractId,
+                          contract_number,
+                          message: 'قرارداد با موفقیت ایجاد شد'
+                        });
+                      }
+
+                      const contract = contractResults[0];
+
+                      // Parse the associated users with description
+                      if (contract.user_details) {
+                        contract.associated_users = contract.user_details.split(',').map(detail => {
+                          const [userId, role, description] = detail.split(':');
+                          return {
+                            user_id: parseInt(userId),
+                            role: role || 'collaborator',
+                            description: description || null
+                          };
+                        });
+
+                        // Remove the raw field
+                        delete contract.user_details;
+                      }
+
+                      res.status(201).json(contract);
+                    });
+                  });
                 });
               }
-
-              res.status(201).json(contractResults[0]);
-            });
-          }
-        );
+            );
+          });
+        });
       });
+    });
+  });
+});
+
+// Get contract with all associated users (including description)
+app.get('/api/contracts/:id/users', verifyTokenAndApproval, (req, res) => {
+
+  const contractId = req.params.id;
+
+  const query = `
+    SELECT 
+      cu.*,
+      u.name,
+      u.phone_number
+    FROM contract_users cu
+    JOIN users u ON cu.user_id = u.id
+    WHERE cu.contract_id = ?
+    ORDER BY
+      cu.created_at
+  `;
+
+  db.query(query, [contractId], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    res.json(results);
+  });
+});
+
+// Add user to contract with description
+app.post('/api/contracts/:id/users', verifyTokenAndApproval, (req, res) => {
+  const contractId = req.params.id;
+  const { user_id, description = null, role = 'collaborator' } = req.body;
+
+  // Validate user exists
+  const checkUserQuery = 'SELECT id FROM users WHERE id = ?';
+  db.query(checkUserQuery, [user_id], (err, userResults) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (userResults.length === 0) {
+      return res.status(404).json({ error: 'کاربر یافت نشد' });
+    }
+
+    // Check if user is already associated
+    const checkExistingQuery = 'SELECT * FROM contract_users WHERE contract_id = ? AND user_id = ?';
+    db.query(checkExistingQuery, [contractId, user_id], (err, existingResults) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      let query, params;
+
+      if (existingResults.length > 0) {
+        // Update existing entry
+        query = `
+          UPDATE contract_users 
+          SET description = ?, role = ?, created_at = CURRENT_TIMESTAMP
+          WHERE contract_id = ? AND user_id = ?
+        `;
+        params = [description, role, contractId, user_id];
+      } else {
+        // Insert new entry
+        query = `
+          INSERT INTO contract_users (contract_id, user_id, description, role)
+          VALUES (?, ?, ?, ?)
+        `;
+        params = [contractId, user_id, description, role];
+      }
+
+      db.query(query, params, (err, result) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to add/update user in contract' });
+        }
+
+        res.status(201).json({
+          message: existingResults.length > 0 ? 'اطلاعات کاربر به‌روزرسانی شد' : 'کاربر با موفقیت به قرارداد اضافه شد'
+        });
+      });
+    });
+  });
+});
+
+// Update user description/role in contract
+app.put('/api/contracts/:id/users/:userId', verifyTokenAndApproval, (req, res) => {
+  const { id: contractId, userId } = req.params;
+  const { description = null, role } = req.body;
+
+  // Prevent updating creator role
+  if (role && role !== 'creator') {
+    const checkCreatorQuery = 'SELECT role FROM contract_users WHERE contract_id = ? AND user_id = ?';
+
+    db.query(checkCreatorQuery, [contractId, userId], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length > 0 && results[0].role === 'creator' && role !== 'creator') {
+        return res.status(400).json({
+          error: 'نمی‌توان نقش سازنده قرارداد را تغییر داد'
+        });
+      }
+
+      performUpdate();
+    });
+  } else {
+    performUpdate();
+  }
+
+  function performUpdate() {
+    const updateQuery = `
+      UPDATE contract_users 
+      SET description = ?, ${role !== undefined ? 'role = ?,' : ''} updated_at = CURRENT_TIMESTAMP
+      WHERE contract_id = ? AND user_id = ?
+    `;
+
+    const params = role !== undefined
+      ? [description, role, contractId, userId]
+      : [description, contractId, userId];
+
+    // Remove trailing comma if role wasn't included
+    const finalQuery = updateQuery.replace(', WHERE', ' WHERE');
+
+    db.query(finalQuery, params, (err, result) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to update user information' });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'ارتباط کاربر با قرارداد یافت نشد' });
+      }
+
+      res.json({ message: 'اطلاعات کاربر با موفقیت به‌روزرسانی شد' });
+    });
+  }
+});
+// Remove user from contract
+app.delete('/api/contracts/:id/users/:userId', verifyTokenAndApproval, (req, res) => {
+  const { id: contractId, userId } = req.params;
+
+  // Prevent removing the creator
+  const checkCreatorQuery = 'SELECT role FROM contract_users WHERE contract_id = ? AND user_id = ?';
+
+  db.query(checkCreatorQuery, [contractId, userId], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (results.length > 0 && results[0].role === 'creator') {
+      return res.status(400).json({ error: 'نمی‌توان سازنده قرارداد را حذف کرد' });
+    }
+
+    const deleteQuery = 'DELETE FROM contract_users WHERE contract_id = ? AND user_id = ?';
+
+    db.query(deleteQuery, [contractId, userId], (err, result) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to remove user from contract' });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'ارتباط کاربر با قرارداد یافت نشد' });
+      }
+
+      res.json({ message: 'کاربر با موفقیت از قرارداد حذف شد' });
     });
   });
 });
@@ -2701,6 +2961,67 @@ app.get('/api/contracts/stats', verifyTokenAndApproval, (req, res) => {
     });
   });
 });
+
+// Get single contract by ID
+app.get('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
+  const contractId = req.params.id;
+
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    let query = '';
+    let params = [];
+
+    if (isAdmin) {
+      query = `
+        SELECT 
+          c.*,
+          u.name as agent_name,
+          u.phone_number as agent_phone,
+          cust.name as customer_name,
+          cust.contact as customer_phone,
+          cust.contact as customer_contact,
+          e.project as estate_project,
+          e.block as estate_block,
+          e.floor as estate_floor,
+          e.area as estate_area,
+          e.rooms as estate_rooms,
+          e.estate_type,
+          e.phone_number as estate_phone,
+          e.price as estate_price
+        FROM contracts c
+        JOIN users u ON c.user_id = u.id
+        JOIN customers cust ON c.customer_id = cust.id
+        JOIN estates e ON c.estate_id = e.id
+        WHERE c.id = ?
+      `;
+      params = [contractId];
+    } else {
+      res.status(401).json({ error: "Unauthorized" })
+    }
+
+    db.query(query, params, (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch contract' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'Contract not found' });
+      }
+
+      // console.log(results[0].attachments);
+
+
+      res.json(results[0]);
+    });
+  });
+});
+
+
 // ========== END CONTRACTS ROUTES ==========
 
 
@@ -2799,12 +3120,82 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
   });
 });
 
+app.get('/api/users', verifyTokenAndApproval, (req, res) => {
+
+  // Check if user is requesting their own data or is admin
+  if (!req.user.is_admin) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // Parse query parameters
+  const limit = parseInt(req.query.limit) || 10;
+  const offset = parseInt(req.query.offset) || 0;
+
+  // Validate inputs
+  if (limit <= 0 || limit > 100) {
+    return res.status(400).json({ error: 'Limit must be between 1 and 100' });
+  }
+
+  if (offset < 0) {
+    return res.status(400).json({ error: 'Offset cannot be negative' });
+  }
+
+  const getUserQuery = `
+    SELECT
+      id, name, phone_number
+    FROM users
+    ORDER BY id ASC
+    LIMIT ?
+    OFFSET ?
+  `;
+
+  db.query(getUserQuery, [limit, offset], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch users' });
+    }
+
+    res.json(results); // Changed from results[0] to results to return all users in the page
+  });
+});
+
+app.get('/api/users/select-list', verifyTokenAndApproval, (req, res) => {
+
+  // console.log(req.user);
+
+  // Check if user is admin (only admins can create contracts)
+  if (!req.user.is_admin) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const getUserQuery = `
+    SELECT
+      id, 
+      name, 
+      phone_number, 
+      role,
+      CONCAT(name, ' - ', phone_number, ' (', role, ')') as display_text
+    FROM users
+    WHERE approved = 1
+    ORDER BY name ASC
+  `;
+
+  db.query(getUserQuery, [], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Failed to fetch users' });
+    }
+
+    res.json(results);
+  });
+});
+
 // Get user by ID (admin only or self)
 app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
   const userId = req.params.id;
 
   // Check if user is requesting their own data or is admin
-  if (req.user.id != userId && !req.user.isAdmin) {
+  if (req.user.id != userId && !req.user.is_admin) {
     return res.status(403).json({ error: 'Access denied' });
   }
 
@@ -2832,12 +3223,13 @@ app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
   });
 });
 
+
 app.put('/api/users/:id', verifyTokenAndApproval, (req, res) => {
   const userId = req.params.id;
   const { name, phone_number, fathers_name, date_of_birth, primary_residence } = req.body;
 
   // Check if user is updating their own data
-  if (req.user.id != userId && !req.user.isAdmin) {
+  if (req.user.id != userId && !req.user.is_admin) {
     return res.status(403).json({ error: 'Access denied' });
   }
 
