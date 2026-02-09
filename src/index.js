@@ -1359,8 +1359,8 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
           relative2_relation || null,
           relative2_phone || null,
           idPhotoPath,
-          1,
-          // 0 // Default not approved
+          // 1,
+          0 // Default not approved
         ],
         (err, result) => {
           if (err) {
@@ -1380,8 +1380,8 @@ app.post('/api/auth/register', upload.single('id_photo'), async (req, res) => {
               id: result.insertId,
               name: name,
               approved: false,
-              is_admin: user.is_admin,
-              role: user.role
+              is_admin: result[0]?.is_admin,
+              role: result[0]?.role
 
             },
             process.env.JWT_SECRET,
@@ -3066,7 +3066,7 @@ app.post('/api/admin/approve-user/:userId', verifyTokenAndApproval, (req, res) =
 
     const approveUserQuery = `
       UPDATE users 
-      SET approved = 1, approved_at = CURRENT_TIMESTAMP 
+      SET approved = 1, approved_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
 
@@ -3091,7 +3091,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
     }
 
     // First get user to delete their ID photo
-    const getUserQuery = 'SELECT id_photo_path FROM users WHERE id = ?';
+    const getUserQuery = 'SELECT role FROM users WHERE id = ?';
     db.query(getUserQuery, [req.params.userId], (err, userResults) => {
       if (err) {
         console.error('Database error:', err);
@@ -3099,22 +3099,39 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
       }
 
       // Delete ID photo file
-      if (userResults[0]?.id_photo_path) {
-        const photoPath = path.join(__dirname, '..', userResults[0].id_photo_path);
-        if (fs.existsSync(photoPath)) {
-          fs.unlinkSync(photoPath);
-        }
+      // if (userResults[0]?.id_photo_path) {
+      //   const photoPath = path.join(__dirname, '..', userResults[0].id_photo_path);
+      //   if (fs.existsSync(photoPath)) {
+      //     fs.unlinkSync(photoPath);
+      //   }
+      // }
+
+
+      let taunts = [
+        'برو شرم و حیا کن',
+        'دسترسی کافی ندارید',
+        'عه بابا، دست نزن جیزّه',
+        'اگه بیشتر امتحان کنی، شاید یه اتفاقی بیافته، کسی چه میدونه',
+        'به دور از شوخی، نکن، اکانتت بن میشه ها!!!',
+        '!!!تنها 1 شانس دیگر دارید!!!',
+        'دست نزن قربونت برم',
+        'انقد سیخونک نکن سیستم رو!!!'
+      ]
+
+      if (userResults[0].role == "god") {
+        return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
       }
 
+
       // Delete user
-      const deleteUserQuery = 'DELETE FROM users WHERE id = ?';
-      db.query(deleteUserQuery, [req.params.userId], (err) => {
+      const updateUserQuery = 'UPDATE users SET approved = 0 WHERE id = ?';
+      db.query(updateUserQuery, [req.params.userId], (err) => {
         if (err) {
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Failed to reject user' });
         }
 
-        res.json({ message: 'User rejected and removed successfully' });
+        res.json({ message: 'User promoted and removed successfully' });
       });
     });
   });
@@ -3204,7 +3221,7 @@ app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
       id, name, phone_number, date_of_birth, national_id, fathers_name,
       primary_residence, relative1_name, relative1_relation, relative1_phone,
       relative2_name, relative2_relation, relative2_phone, id_photo_path,
-      approved, approved_at, created_at, updated_at
+      approved, approved_at, created_at, updated_at, is_admin
     FROM users 
     WHERE id = ?
   `;
@@ -3365,6 +3382,279 @@ app.post('/api/auth/change-password', verifyTokenAndApproval, async (req, res) =
     console.error('Password change error:', error);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+app.get('/api/admin/users', verifyTokenAndApproval, (req, res) => {
+  // Check if user is admin
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err || !isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = (page - 1) * limit;
+
+    const query = `
+      SELECT 
+        id, name, phone_number, national_id, fathers_name,
+        date_of_birth, primary_residence, approved, approved_at,
+        is_admin, role, created_at, updated_at
+      FROM users
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const countQuery = 'SELECT COUNT(*) as total FROM users';
+
+    // Get total count
+    db.query(countQuery, (err, countResults) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      const total = countResults[0].total;
+
+      // Get users
+      db.query(query, [limit, offset], (err, results) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to fetch users' });
+        }
+
+        res.json({
+          users: results,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit)
+          }
+        });
+      });
+    });
+  });
+});
+
+// Toggle admin status
+app.put('/api/admin/users/:id/toggle-admin', verifyTokenAndApproval, (req, res) => {
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err || !isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const userId = req.params.id;
+
+    // Prevent user from changing their own admin status
+    if (parseInt(userId) === parseInt(req.user.id)) {
+      return res.status(400).json({ error: 'Cannot change your own admin status' });
+    }
+
+    // Get current admin status
+    const getStatusQuery = 'SELECT role, is_admin FROM users WHERE id = ?';
+    db.query(getStatusQuery, [userId], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // console.log(results[0]?.role);
+
+      let taunts = [
+        'برو شرم و حیا کن',
+        'دسترسی کافی ندارید',
+        'عه بابا، دست نزن جیزّه',
+        'اگه بیشتر امتحان کنی، شاید یه اتفاقی بیافته، کسی چه میدونه',
+        'به دور از شوخی، نکن، اکانتت بن میشه ها!!!',
+        '!!!تنها 1 شانس دیگر دارید!!!'
+      ]
+
+      if (results[0].role == "god") {
+        return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
+      }
+
+      const currentStatus = results[0].is_admin;
+      const newStatus = !currentStatus;
+
+      // Update admin status
+      const updateQuery = 'UPDATE users SET is_admin = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      db.query(updateQuery, [newStatus ? 1 : 0, userId], (err) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to update admin status' });
+        }
+
+        res.json({
+          message: `User admin status ${newStatus ? 'granted' : 'revoked'} successfully`,
+          is_admin: newStatus
+        });
+      });
+    });
+  });
+});
+
+// Reset user password (admin only)
+app.post('/api/admin/users/:id/reset-password', verifyTokenAndApproval, async (req, res) => {
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err || !isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const userId = req.params.id;
+
+    // Generate random password
+    const generateRandomPassword = () => {
+      const length = 8;
+      const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let password = "";
+      for (let i = 0; i < length; i++) {
+        password += charset.charAt(Math.floor(Math.random() * charset.length));
+      }
+      return password;
+    };
+
+    const newPassword = generateRandomPassword();
+
+    // Hash password
+    bcrypt.hash(newPassword, 10, (err, hashedPassword) => {
+      if (err) {
+        console.error('Password hashing error:', err);
+        return res.status(500).json({ error: 'Failed to reset password' });
+      }
+
+      // Update password
+      const updateQuery = 'UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      db.query(updateQuery, [hashedPassword, userId], (err) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to reset password' });
+        }
+
+        // Get user info to send SMS (you'll need to implement SMS service)
+        const getUserQuery = 'SELECT name, phone_number FROM users WHERE id = ?';
+        db.query(getUserQuery, [userId], (err, userResults) => {
+          if (err) {
+            console.error('Database error:', err);
+            // Still return success since password was reset
+            return res.json({
+              message: 'Password reset successfully',
+              new_password: newPassword,
+              note: 'Please send this password to the user securely'
+            });
+          }
+
+          // Here you would typically send SMS with new password
+          // For now, we'll just return it (in production, use secure methods)
+
+          res.json({
+            message: 'Password reset successfully',
+            user: {
+              name: userResults[0].name,
+              phone_number: userResults[0].phone_number
+            },
+            new_password: newPassword,
+            note: 'Send this password to the user through secure channels'
+          });
+        });
+      });
+    });
+  });
+});
+
+// Delete user (admin only)
+app.delete('/api/admin/users/:id', verifyTokenAndApproval, (req, res) => {
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err || !isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const userId = req.params.id;
+
+    // Prevent user from deleting themselves
+    if (parseInt(userId) === parseInt(req.user.id)) {
+      return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+
+    // First get user info to delete their ID photo
+    const getUserQuery = 'SELECT id_photo_path FROM users WHERE id = ?';
+    db.query(getUserQuery, [userId], (err, userResults) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      if (userResults.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Delete ID photo file if exists
+      const idPhotoPath = userResults[0].id_photo_path;
+      if (idPhotoPath) {
+        const fullPath = path.join(__dirname, '..', idPhotoPath);
+        if (fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+        }
+      }
+
+      // Delete user (cascade will handle related records)
+      const deleteQuery = 'DELETE FROM users WHERE id = ?';
+      db.query(deleteQuery, [userId], (err) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to delete user' });
+        }
+
+        res.json({ message: 'User deleted successfully' });
+      });
+    });
+  });
+});
+
+// Get user detailed information
+app.get('/api/users/:id/details', verifyTokenAndApproval, (req, res) => {
+  const userId = req.params.id;
+
+  // Check if user is requesting their own data or is admin
+  checkIsAdmin(req.user.id, (err, isAdmin) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (parseInt(userId) !== parseInt(req.user.id) && !isAdmin) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const query = `
+      SELECT 
+        id, name, phone_number, national_id, fathers_name,
+        date_of_birth, primary_residence, 
+        relative1_name, relative1_relation, relative1_phone,
+        relative2_name, relative2_relation, relative2_phone,
+        id_photo_path, approved, approved_at, is_admin, role,
+        created_at, updated_at
+      FROM users 
+      WHERE id = ?
+    `;
+
+    db.query(query, [userId], (err, results) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to fetch user details' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json(results[0]);
+    });
+  });
 });
 
 // Serve uploaded files
