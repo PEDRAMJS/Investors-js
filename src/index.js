@@ -2436,16 +2436,18 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
                   // Process additional users
                   const userValues = users.map(user => {
                     // Support both object format and simple ID format
-                    let userId, description, role;
+                    let userId, description, role, fee;
 
                     if (typeof user === 'object' && user !== null) {
                       userId = user.user_id || user.id;
                       description = user.description || null;
+                      fee = user.fee_amount
                       role = user.role || 'collaborator';
                     } else {
                       // Simple ID format
                       userId = user;
                       description = null;
+                      fee = 1234500
                       role = 'collaborator';
                     }
 
@@ -2454,15 +2456,16 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
                       return null;
                     }
 
-                    return [contractId, userId, description, role];
+                    return [contractId, userId, description, role, fee];
                   }).filter(value => value !== null); // Remove null entries
+                  
 
                   if (userValues.length === 0) {
                     return callback(null);
                   }
 
                   const insertUsersQuery = `
-                    INSERT INTO contract_users (contract_id, user_id, description, role)
+                    INSERT INTO contract_users (contract_id, user_id, description, role, fee)
                     VALUES ?
                   `;
 
@@ -2476,8 +2479,7 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
                 // Insert into pivot table
                 handlePivotTable((err) => {
 
-                  console.log("ERROR: ", err);
-
+                  // console.log("ERROR: ", err);
 
                   if (err) {
                     return conn.rollback(() => {
@@ -3120,6 +3122,8 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
 
       if (userResults[0].role == "god") {
         return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
+        // return res.status(401).json({ error: 'You lack permission' });
+        
       }
 
 
@@ -3476,6 +3480,7 @@ app.put('/api/admin/users/:id/toggle-admin', verifyTokenAndApproval, (req, res) 
 
       if (results[0].role == "god") {
         return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
+        // return res.status(401).json({ error: 'You lack permission' });
       }
 
       const currentStatus = results[0].is_admin;
