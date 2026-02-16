@@ -13,13 +13,26 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// app.set('trust proxy', 1);  // Trust first proxy
+
 // Middleware
 app.use(cors({
-  origin: ['http://94.182.92.245', 'http://localhost:5173', 'http://localhost:3000'],
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  // origin: ['https://agent.inmelk.com'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+app.use((req, res, next) => {
+  console.log('Origin:', req.headers.origin);
+  console.log('Protocol:', req.protocol); // Should now be 'https'
+  console.log('Secure:', req.secure); // Should be true
+  console.log('X-Forwarded-Proto:', req.headers['x-forwarded-proto']); // Should be 'https'
+  next();
+});
+
+
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, '../public')));
@@ -1762,46 +1775,143 @@ app.delete('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
   });
 });
 
-app.get('/api/estates', verifyTokenAndApproval, (req, res) => {
-  const getEstateQuery = `
-    SELECT e.*, u.name as creator_name 
-    FROM estates e
-    JOIN users u ON e.user_id = u.id
-    -- WHERE e.user_id = ? 
-    ORDER BY e.created_at DESC
-  `;
 
-  checkIsAdmin(req.user.id, (err, is_admin) => {
+
+app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
+  const {
+    estate_type,
+    phase,
+    project,
+    block,
+    floor,
+    area,
+    rooms,
+    features,
+    notes,
+    phone_number,
+    price,
+  } = req.body;
+
+  if (!phase) {
+    if (phase < 0) {
+      return res.status(400).json({ error: 'Phase can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Phase is required' });
+  }
+
+  if (!block || block.length <= 0) {
+    return res.status(400).json({ error: 'Block is required' });
+  }
+
+  if (!floor) {
+    if (floor < 0) {
+      return res.status(400).json({ error: 'Floor can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Floor is required' });
+  }
+
+  if (!area) {
+    if (area <= 0) {
+      return res.status(400).json({ error: 'Area can not be zero or less' });
+    }
+    return res.status(400).json({ error: 'Area is required' });
+  }
+
+  if (!rooms) {
+    if (rooms < 0) {
+      return res.status(400).json({ error: 'Rooms can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Rooms is required' });
+  }
+
+  const phoneRegex = /^09\d{9}$/;
+  if (!phoneRegex.test(phone_number)) {
+    return res.status(400).json({
+      error: 'Phone number must be 11 digits starting with 09'
+    });
+  }
+
+  if (!price) {
+    if (price < 0) {
+      return res.status(400).json({ error: 'Price can not be less than zero' });
+    }
+    return res.status(400).json({ error: 'Price is required' });
+  }
+
+  if (!project || project.length <= 0) {
+    return res.status(400).json({ error: 'Project is required' });
+  }
+
+  if (!estate_type || estate_type.length <= 0) {
+    return res.status(400).json({ error: 'Estate type is required' });
+  }
+
+  const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
+  db.query(checkEstateQuery, [req.params.id, req.user.id], (err, results) => {
     if (err) {
+      console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
 
-
-    if (!is_admin) {
-      return res.status(401).json({ error: 'Authorization error' });
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Estate not found' });
     }
 
-    db.query(getEstateQuery, [req.user.id], (err, results) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: 'Failed to fetch estates' });
-      }
+    const updateEstateQuery = `
+      UPDATE estates
+      SET 
+        estate_type = ?
+        phase = ?
+        project = ?
+        block = ?
+        floor = ?
+        area = ?
+        rooms = ?
+        features = ?
+        notes = ?
+        phone_number = ?
+        price = ?
+      WHERE id = ? AND user_id = ?
+    `;
 
-      if (!is_admin) {
-        results.forEach(estate => {
-          if (estate.user_id != req.user.id) {
-            estate.phone_number = '09*********'
-          }
+    db.query(
+      updateEstateQuery,
+      [
+        estate_type || results[0].estate_type,
+        phase || results[0].phase,
+        project || results[0].project,
+        block || results[0].block,
+        floor || results[0].floor,
+        area || results[0].area,
+        rooms || results[0].rooms,
+        features || results[0].features,
+        notes || results[0].notes,
+        phone_number || results[0].phone_number,
+        price || results[0].price
+      ], (err) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Failed to update customer' });
         }
-        )
+
+        // Get updated customer
+        const getUpdatedQuery = `
+          SELECT e.*, u.name as creator_name 
+          FROM customers e
+          JOIN users u ON e.user_id = u.id
+          WHERE e.id = ?
+        `;
+        db.query(getUpdatedQuery, [req.params.id], (err, updatedResults) => {
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Failed to fetch updated customer' });
+          }
+          res.json(updatedResults[0]);
+        });
       }
-
-      res.json(results);
-
-    });
+    )
   })
 })
-
 app.get('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
   const getEstateQuery = `
     SELECT e.*, u.name as creator_name 
@@ -1823,7 +1933,32 @@ app.get('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     res.json(results[0]);
   });
 })
+app.delete('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
+  // First check if customer belongs to user
+  const checkEstateQuery = 'SELECT is_admin FROM users WHERE id = ?';
+  db.query(checkEstateQuery, [req.user.id], (err, results) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
 
+    if (!results[0]?.is_admin) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Delete Estate
+
+    const deleteEstateQuery = 'DELETE FROM estates WHERE id = ? AND user_id = ?';
+    db.query(deleteEstateQuery, [req.params.id, req.user.id], (err) => {
+      if (err) {
+        console.error('Database error:', err);
+        return res.status(500).json({ error: 'Failed to delete Estate' });
+      }
+
+      res.json({ message: 'Estate deleted successfully' });
+    });
+  });
+})
 app.post('/api/estates', verifyTokenAndApproval, (req, res) => {
 
   const {
@@ -1971,169 +2106,44 @@ app.post('/api/estates', verifyTokenAndApproval, (req, res) => {
     );
   });
 })
+app.get('/api/estates', verifyTokenAndApproval, (req, res) => {
+  const getEstateQuery = `
+    SELECT e.*, u.name as creator_name 
+    FROM estates e
+    JOIN users u ON e.user_id = u.id
+    -- WHERE e.user_id = ? 
+    ORDER BY e.created_at DESC
+  `;
 
-app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
-  const {
-    estate_type,
-    phase,
-    project,
-    block,
-    floor,
-    area,
-    rooms,
-    features,
-    notes,
-    phone_number,
-    price,
-  } = req.body;
-
-
-
-  if (!phase) {
-    if (phase < 0) {
-      return res.status(400).json({ error: 'Phase can not be less than zero' });
-    }
-    return res.status(400).json({ error: 'Phase is required' });
-  }
-
-  if (!block || block.length <= 0) {
-    return res.status(400).json({ error: 'Block is required' });
-  }
-
-  if (!floor) {
-    if (floor < 0) {
-      return res.status(400).json({ error: 'Floor can not be less than zero' });
-    }
-    return res.status(400).json({ error: 'Floor is required' });
-  }
-
-  if (!area) {
-    if (area <= 0) {
-      return res.status(400).json({ error: 'Area can not be zero or less' });
-    }
-    return res.status(400).json({ error: 'Area is required' });
-  }
-
-  if (!rooms) {
-    if (rooms < 0) {
-      return res.status(400).json({ error: 'Rooms can not be less than zero' });
-    }
-    return res.status(400).json({ error: 'Rooms is required' });
-  }
-
-  const phoneRegex = /^09\d{9}$/;
-  if (!phoneRegex.test(phone_number)) {
-    return res.status(400).json({
-      error: 'Phone number must be 11 digits starting with 09'
-    });
-  }
-
-  if (!price) {
-    if (price < 0) {
-      return res.status(400).json({ error: 'Price can not be less than zero' });
-    }
-    return res.status(400).json({ error: 'Price is required' });
-  }
-
-  if (!project || project.length <= 0) {
-    return res.status(400).json({ error: 'Project is required' });
-  }
-
-  if (!estate_type || estate_type.length <= 0) {
-    return res.status(400).json({ error: 'Estate type is required' });
-  }
-
-  const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
-  db.query(checkEstateQuery, [req.params.id, req.user.id], (err, results) => {
+  checkIsAdmin(req.user.id, (err, is_admin) => {
     if (err) {
-      console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
 
-    if (results.length === 0) {
-      return res.status(404).json({ error: 'Estate not found' });
+
+    if (!is_admin) {
+      return res.status(401).json({ error: 'Authorization error' });
     }
 
-    const updateEstateQuery = `
-      UPDATE estates
-      SET 
-        estate_type = ?
-        phase = ?
-        project = ?
-        block = ?
-        floor = ?
-        area = ?
-        rooms = ?
-        features = ?
-        notes = ?
-        phone_number = ?
-        price = ?
-      WHERE id = ? AND user_id = ?
-    `;
-
-    db.query(
-      updateEstateQuery,
-      [
-        estate_type || results[0].estate_type,
-        phase || results[0].phase,
-        project || results[0].project,
-        block || results[0].block,
-        floor || results[0].floor,
-        area || results[0].area,
-        rooms || results[0].rooms,
-        features || results[0].features,
-        notes || results[0].notes,
-        phone_number || results[0].phone_number,
-        price || results[0].price
-      ], (err) => {
-        if (err) {
-          console.error('Database error:', err);
-          return res.status(500).json({ error: 'Failed to update customer' });
-        }
-
-        // Get updated customer
-        const getUpdatedQuery = `
-          SELECT e.*, u.name as creator_name 
-          FROM customers e
-          JOIN users u ON e.user_id = u.id
-          WHERE e.id = ?
-        `;
-        db.query(getUpdatedQuery, [req.params.id], (err, updatedResults) => {
-          if (err) {
-            console.error('Database error:', err);
-            return res.status(500).json({ error: 'Failed to fetch updated customer' });
-          }
-          res.json(updatedResults[0]);
-        });
-      }
-    )
-  })
-})
-app.delete('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
-  // First check if customer belongs to user
-  const checkEstateQuery = 'SELECT is_admin FROM users WHERE id = ?';
-  db.query(checkEstateQuery, [req.user.id], (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    if (!results[0]?.is_admin) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    // Delete Estate
-
-    const deleteEstateQuery = 'DELETE FROM estates WHERE id = ? AND user_id = ?';
-    db.query(deleteEstateQuery, [req.params.id, req.user.id], (err) => {
+    db.query(getEstateQuery, [req.user.id], (err, results) => {
       if (err) {
         console.error('Database error:', err);
-        return res.status(500).json({ error: 'Failed to delete Estate' });
+        return res.status(500).json({ error: 'Failed to fetch estates' });
       }
 
-      res.json({ message: 'Estate deleted successfully' });
+      if (!is_admin) {
+        results.forEach(estate => {
+          if (estate.user_id != req.user.id) {
+            estate.phone_number = '09*********'
+          }
+        }
+        )
+      }
+
+      res.json(results);
+
     });
-  });
+  })
 })
 
 // ========== CONTRACTS ROUTES ==========
@@ -2458,7 +2468,7 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
 
                     return [contractId, userId, description, role, fee];
                   }).filter(value => value !== null); // Remove null entries
-                  
+
 
                   if (userValues.length === 0) {
                     return callback(null);
@@ -3123,7 +3133,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
       if (userResults[0].role == "god") {
         return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
         // return res.status(401).json({ error: 'You lack permission' });
-        
+
       }
 
 
@@ -3607,7 +3617,12 @@ app.delete('/api/admin/users/:id', verifyTokenAndApproval, (req, res) => {
       }
 
       // Delete user (cascade will handle related records)
-      const deleteQuery = 'DELETE FROM users WHERE id = ?';
+
+      // delete
+      // const deleteQuery = 'DELETE FROM users WHERE id = ?';
+      // soft delete
+      const deleteQuery = 'UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?';
+
       db.query(deleteQuery, [userId], (err) => {
         if (err) {
           console.error('Database error:', err);
