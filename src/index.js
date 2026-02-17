@@ -1775,8 +1775,6 @@ app.delete('/api/customers/:id', verifyTokenAndApproval, (req, res) => {
   });
 });
 
-
-
 app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
   const {
     estate_type,
@@ -1790,8 +1788,15 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     notes,
     phone_number,
     price,
+    total_floors,
+    units_per_floor,
+    deed_type,
+    occupancy_status
   } = req.body;
 
+  const is_admin = req.user.isAdmin
+
+  // Phase validation
   if (!phase) {
     if (phase < 0) {
       return res.status(400).json({ error: 'Phase can not be less than zero' });
@@ -1799,10 +1804,12 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     return res.status(400).json({ error: 'Phase is required' });
   }
 
+  // Block validation
   if (!block || block.length <= 0) {
     return res.status(400).json({ error: 'Block is required' });
   }
 
+  // Floor validation
   if (!floor) {
     if (floor < 0) {
       return res.status(400).json({ error: 'Floor can not be less than zero' });
@@ -1810,6 +1817,7 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     return res.status(400).json({ error: 'Floor is required' });
   }
 
+  // Area validation
   if (!area) {
     if (area <= 0) {
       return res.status(400).json({ error: 'Area can not be zero or less' });
@@ -1817,6 +1825,7 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     return res.status(400).json({ error: 'Area is required' });
   }
 
+  // Rooms validation
   if (!rooms) {
     if (rooms < 0) {
       return res.status(400).json({ error: 'Rooms can not be less than zero' });
@@ -1824,6 +1833,7 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     return res.status(400).json({ error: 'Rooms is required' });
   }
 
+  // Phone number validation
   const phoneRegex = /^09\d{9}$/;
   if (!phoneRegex.test(phone_number)) {
     return res.status(400).json({
@@ -1831,6 +1841,7 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     });
   }
 
+  // Price validation
   if (!price) {
     if (price < 0) {
       return res.status(400).json({ error: 'Price can not be less than zero' });
@@ -1838,16 +1849,35 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     return res.status(400).json({ error: 'Price is required' });
   }
 
+  // Project validation
   if (!project || project.length <= 0) {
     return res.status(400).json({ error: 'Project is required' });
   }
 
+  // Estate type validation
   if (!estate_type || estate_type.length <= 0) {
     return res.status(400).json({ error: 'Estate type is required' });
   }
 
-  const checkEstateQuery = 'SELECT * FROM estates WHERE id = ? AND user_id = ?';
-  db.query(checkEstateQuery, [req.params.id, req.user.id], (err, results) => {
+  // New fields validation
+  if (total_floors !== undefined && total_floors < 1) {
+    return res.status(400).json({ error: 'Total floors must be at least 1' });
+  }
+
+  if (units_per_floor !== undefined && units_per_floor < 1) {
+    return res.status(400).json({ error: 'Units per floor must be at least 1' });
+  }
+
+  if (!deed_type || deed_type.length <= 0) {
+    return res.status(400).json({ error: 'Deed type is required' });
+  }
+
+  if (!occupancy_status || occupancy_status.length <= 0) {
+    return res.status(400).json({ error: 'Occupancy status is required' });
+  }
+
+  const checkEstateQuery = 'SELECT * FROM estates WHERE id = ?';
+  db.query(checkEstateQuery, [req.params.id], (err, results) => {
     if (err) {
       console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
@@ -1860,18 +1890,22 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     const updateEstateQuery = `
       UPDATE estates
       SET 
-        estate_type = ?
-        phase = ?
-        project = ?
-        block = ?
-        floor = ?
-        area = ?
-        rooms = ?
-        features = ?
-        notes = ?
-        phone_number = ?
-        price = ?
-      WHERE id = ? AND user_id = ?
+        estate_type = ?,
+        phase = ?,
+        project = ?,
+        block = ?,
+        floor = ?,
+        area = ?,
+        rooms = ?,
+        features = ?,
+        notes = ?,
+        phone_number = ?,
+        price = ?,
+        total_floors = ?,
+        units_per_floor = ?,
+        deed_type = ?,
+        occupancy_status = ?
+      WHERE id = ?
     `;
 
     db.query(
@@ -1884,27 +1918,32 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
         floor || results[0].floor,
         area || results[0].area,
         rooms || results[0].rooms,
-        features || results[0].features,
+        features ? JSON.stringify(features) : JSON.stringify(results[0].features),
         notes || results[0].notes,
         phone_number || results[0].phone_number,
-        price || results[0].price
+        price || results[0].price,
+        total_floors || results[0].total_floors,
+        units_per_floor || results[0].units_per_floor,
+        deed_type || results[0].deed_type,
+        occupancy_status || results[0].occupancy_status,
+        results[0].id
       ], (err) => {
         if (err) {
           console.error('Database error:', err);
-          return res.status(500).json({ error: 'Failed to update customer' });
+          return res.status(500).json({ error: 'Failed to update estate' });
         }
 
-        // Get updated customer
+        // Get updated estate
         const getUpdatedQuery = `
           SELECT e.*, u.name as creator_name 
-          FROM customers e
+          FROM estates e
           JOIN users u ON e.user_id = u.id
           WHERE e.id = ?
         `;
         db.query(getUpdatedQuery, [req.params.id], (err, updatedResults) => {
           if (err) {
             console.error('Database error:', err);
-            return res.status(500).json({ error: 'Failed to fetch updated customer' });
+            return res.status(500).json({ error: 'Failed to fetch updated estate' });
           }
           res.json(updatedResults[0]);
         });
@@ -1912,6 +1951,7 @@ app.put('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
     )
   })
 })
+
 app.get('/api/estates/:id', verifyTokenAndApproval, (req, res) => {
   const getEstateQuery = `
     SELECT e.*, u.name as creator_name 
