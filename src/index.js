@@ -23,13 +23,13 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use((req, res, next) => {
-  console.log('Origin:', req.headers.origin);
-  console.log('Protocol:', req.protocol); // Should now be 'https'
-  console.log('Secure:', req.secure); // Should be true
-  console.log('X-Forwarded-Proto:', req.headers['x-forwarded-proto']); // Should be 'https'
-  next();
-});
+// app.use((req, res, next) => {
+//   console.log('Origin:', req.headers.origin);
+//   console.log('Protocol:', req.protocol); // Should now be 'https'
+//   console.log('Secure:', req.secure); // Should be true
+//   console.log('X-Forwarded-Proto:', req.headers['x-forwarded-proto']); // Should be 'https'
+//   next();
+// });
 
 
 
@@ -2343,7 +2343,6 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
 
   const users = JSON.parse(req.body.users)
 
-
   // Validation
   if (!customer_id || !estate_id || !contract_type || !contract_date || !amount) {
     return res.status(400).json({
@@ -2396,7 +2395,7 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
 
         if (activeContracts.length > 0) {
           return res.status(400).json({
-            error: 'این ملک قبلاً دارای قرارداد فعال است'
+            error: 'این ملک دارای قرارداد فعال است'
           });
         }
 
@@ -2462,13 +2461,13 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
                 // Handle pivot table entries for multiple users with description
                 const handlePivotTable = (callback) => {
                   // Always add the creator first
-                  const insertCreatorQuery = `
-                  INSERT INTO contract_users (contract_id, user_id, description, role)
-                  VALUES (?, ?, ?, ?)
-                `;
+                  //   const insertCreatorQuery = `
+                  //   INSERT INTO contract_users (contract_id, user_id, description, role)
+                  //   VALUES (?, ?, ?, ?)
+                  // `;
 
                   // Add creator with optional description
-                  const creatorDescription = req.body.creator_description || 'سازنده قرارداد';
+                  // const creatorDescription = req.body.creator_description || 'سازنده قرارداد';
 
                   // conn.query(insertCreatorQuery, [
                   //   contractId,
@@ -2486,29 +2485,11 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
                   // Process additional users
                   const userValues = users.map(user => {
                     // Support both object format and simple ID format
-                    let userId, description, role, fee;
 
-                    if (typeof user === 'object' && user !== null) {
-                      userId = user.user_id || user.id;
-                      description = user.description || null;
-                      fee = user.fee_amount
-                      role = user.role || 'collaborator';
-                    } else {
-                      // Simple ID format
-                      userId = user;
-                      description = null;
-                      fee = 1234500
-                      role = 'collaborator';
-                    }
+                    let { user_id, description, role, fee_amount } = user;
 
-                    // Skip if it's the creator (already added)
-                    if (parseInt(userId) === parseInt(req.user.id)) {
-                      return null;
-                    }
-
-                    return [contractId, userId, description, role, fee];
+                    return [contractId, user_id, description, role, fee_amount];
                   }).filter(value => value !== null); // Remove null entries
-
 
                   if (userValues.length === 0) {
                     return callback(null);
@@ -2523,6 +2504,7 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
                     if (err) return callback(err);
                     callback(null);
                   });
+
 
                 };
 
@@ -2592,9 +2574,9 @@ app.post('/api/contracts', verifyTokenAndApproval, uploadContract.array('files')
                       // Parse the associated users with description
                       if (contract.user_details) {
                         contract.associated_users = contract.user_details.split(',').map(detail => {
-                          const [userId, role, description] = detail.split(':');
+                          const [user_id, role, description] = detail.split(':');
                           return {
-                            user_id: parseInt(userId),
+                            user_id: parseInt(user_id),
                             role: role || 'collaborator',
                             description: description || null
                           };
@@ -2645,118 +2627,119 @@ app.get('/api/contracts/:id/users', verifyTokenAndApproval, (req, res) => {
 });
 
 // Add user to contract with description
-app.post('/api/contracts/:id/users', verifyTokenAndApproval, (req, res) => {
-  const contractId = req.params.id;
-  const { user_id, description = null, role = 'collaborator' } = req.body;
+// app.post('/api/contracts/:id/users', verifyTokenAndApproval, (req, res) => {
+//   const contractId = req.params.id;
+//   const { user_id, description = null, role = 'collaborator' } = req.body;
 
-  // Validate user exists
-  const checkUserQuery = 'SELECT id FROM users WHERE id = ?';
-  db.query(checkUserQuery, [user_id], (err, userResults) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
+//   // Validate user exists
+//   const checkUserQuery = 'SELECT id FROM users WHERE id = ?';
+//   db.query(checkUserQuery, [user_id], (err, userResults) => {
+//     if (err) {
+//       console.error('Database error:', err);
+//       return res.status(500).json({ error: 'Database error' });
+//     }
 
-    if (userResults.length === 0) {
-      return res.status(404).json({ error: 'کاربر یافت نشد' });
-    }
+//     if (userResults.length === 0) {
+//       return res.status(404).json({ error: 'کاربر یافت نشد' });
+//     }
 
-    // Check if user is already associated
-    const checkExistingQuery = 'SELECT * FROM contract_users WHERE contract_id = ? AND user_id = ?';
-    db.query(checkExistingQuery, [contractId, user_id], (err, existingResults) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: 'Database error' });
-      }
+//     // Check if user is already associated
+//     const checkExistingQuery = 'SELECT * FROM contract_users WHERE contract_id = ? AND user_id = ?';
+//     db.query(checkExistingQuery, [contractId, user_id], (err, existingResults) => {
+//       if (err) {
+//         console.error('Database error:', err);
+//         return res.status(500).json({ error: 'Database error' });
+//       }
 
-      let query, params;
+//       let query, params;
 
-      if (existingResults.length > 0) {
-        // Update existing entry
-        query = `
-          UPDATE contract_users 
-          SET description = ?, role = ?, created_at = CURRENT_TIMESTAMP
-          WHERE contract_id = ? AND user_id = ?
-        `;
-        params = [description, role, contractId, user_id];
-      } else {
-        // Insert new entry
-        query = `
-          INSERT INTO contract_users (contract_id, user_id, description, role)
-          VALUES (?, ?, ?, ?)
-        `;
-        params = [contractId, user_id, description, role];
-      }
+//       if (existingResults.length > 0) {
+//         // Update existing entry
+//         query = `
+//           UPDATE contract_users 
+//           SET description = ?, role = ?, created_at = CURRENT_TIMESTAMP
+//           WHERE contract_id = ? AND user_id = ?
+//         `;
+//         params = [description, role, contractId, user_id];
+//       } else {
+//         // Insert new entry
+//         query = `
+//           INSERT INTO contract_users (contract_id, user_id, description, role)
+//           VALUES (?, ?, ?, ?)
+//         `;
+//         params = [contractId, user_id, description, role];
+//       }
 
-      db.query(query, params, (err, result) => {
-        if (err) {
-          console.error('Database error:', err);
-          return res.status(500).json({ error: 'Failed to add/update user in contract' });
-        }
+//       db.query(query, params, (err, result) => {
+//         if (err) {
+//           console.error('Database error:', err);
+//           return res.status(500).json({ error: 'Failed to add/update user in contract' });
+//         }
 
-        res.status(201).json({
-          message: existingResults.length > 0 ? 'اطلاعات کاربر به‌روزرسانی شد' : 'کاربر با موفقیت به قرارداد اضافه شد'
-        });
-      });
-    });
-  });
-});
+//         res.status(201).json({
+//           message: existingResults.length > 0 ? 'اطلاعات کاربر به‌روزرسانی شد' : 'کاربر با موفقیت به قرارداد اضافه شد'
+//         });
+//       });
+//     });
+//   });
+// });
 
 // Update user description/role in contract
-app.put('/api/contracts/:id/users/:userId', verifyTokenAndApproval, (req, res) => {
-  const { id: contractId, userId } = req.params;
-  const { description = null, role } = req.body;
+// app.put('/api/contracts/:id/users/:userId', verifyTokenAndApproval, (req, res) => {
+//   const { id: contractId, userId } = req.params;
+//   const { description = null, role } = req.body;
 
-  // Prevent updating creator role
-  if (role && role !== 'creator') {
-    const checkCreatorQuery = 'SELECT role FROM contract_users WHERE contract_id = ? AND user_id = ?';
+//   // Prevent updating creator role
+//   if (role && role !== 'creator') {
+//     const checkCreatorQuery = 'SELECT role FROM contract_users WHERE contract_id = ? AND user_id = ?';
 
-    db.query(checkCreatorQuery, [contractId, userId], (err, results) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: 'Database error' });
-      }
+//     db.query(checkCreatorQuery, [contractId, userId], (err, results) => {
+//       if (err) {
+//         console.error('Database error:', err);
+//         return res.status(500).json({ error: 'Database error' });
+//       }
 
-      if (results.length > 0 && results[0].role === 'creator' && role !== 'creator') {
-        return res.status(400).json({
-          error: 'نمی‌توان نقش سازنده قرارداد را تغییر داد'
-        });
-      }
+//       if (results.length > 0 && results[0].role === 'creator' && role !== 'creator') {
+//         return res.status(400).json({
+//           error: 'نمی‌توان نقش سازنده قرارداد را تغییر داد'
+//         });
+//       }
 
-      performUpdate();
-    });
-  } else {
-    performUpdate();
-  }
+//       performUpdate();
+//     });
+//   } else {
+//     performUpdate();
+//   }
 
-  function performUpdate() {
-    const updateQuery = `
-      UPDATE contract_users 
-      SET description = ?, ${role !== undefined ? 'role = ?,' : ''} updated_at = CURRENT_TIMESTAMP
-      WHERE contract_id = ? AND user_id = ?
-    `;
+//   function performUpdate() {
+//     const updateQuery = `
+//       UPDATE contract_users 
+//       SET description = ?, ${role !== undefined ? 'role = ?,' : ''} updated_at = CURRENT_TIMESTAMP
+//       WHERE contract_id = ? AND user_id = ?
+//     `;
 
-    const params = role !== undefined
-      ? [description, role, contractId, userId]
-      : [description, contractId, userId];
+//     const params = role !== undefined
+//       ? [description, role, contractId, userId]
+//       : [description, contractId, userId];
 
-    // Remove trailing comma if role wasn't included
-    const finalQuery = updateQuery.replace(', WHERE', ' WHERE');
+//     // Remove trailing comma if role wasn't included
+//     const finalQuery = updateQuery.replace(', WHERE', ' WHERE');
 
-    db.query(finalQuery, params, (err, result) => {
-      if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: 'Failed to update user information' });
-      }
+//     db.query(finalQuery, params, (err, result) => {
+//       if (err) {
+//         console.error('Database error:', err);
+//         return res.status(500).json({ error: 'Failed to update user information' });
+//       }
 
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'ارتباط کاربر با قرارداد یافت نشد' });
-      }
+//       if (result.affectedRows === 0) {
+//         return res.status(404).json({ error: 'ارتباط کاربر با قرارداد یافت نشد' });
+//       }
 
-      res.json({ message: 'اطلاعات کاربر با موفقیت به‌روزرسانی شد' });
-    });
-  }
-});
+//       res.json({ message: 'اطلاعات کاربر با موفقیت به‌روزرسانی شد' });
+//     });
+//   }
+// });
+
 // Remove user from contract
 app.delete('/api/contracts/:id/users/:userId', verifyTokenAndApproval, (req, res) => {
   const { id: contractId, userId } = req.params;
@@ -2792,125 +2775,238 @@ app.delete('/api/contracts/:id/users/:userId', verifyTokenAndApproval, (req, res
 });
 
 // Update contract
+// Unified API for managing contract users
 app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('files'), (req, res) => {
-
   const contractId = req.params.id;
-  const {
-    contract_type,
-    contract_date,
-    amount,
-    duration_months,
-    payment_method,
-    commission,
-    status,
-    notes
-  } = req.body;
 
-  // First check if contract belongs to user (or user is admin)
-  checkIsAdmin(req.user.id, (err, isAdmin) => {
+  const users = JSON.parse(req.body.users)
+
+  // Get database connection for transaction
+  db.getConnection((err, conn) => {
     if (err) {
-      console.error('Database error:', err);
+      console.error('Connection error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
 
-    let checkQuery = '';
-    let checkParams = [];
-
-    if (isAdmin) {
-      checkQuery = 'SELECT * FROM contracts WHERE id = ?';
-      checkParams = [contractId];
-    } else {
-      checkQuery = 'SELECT * FROM contracts WHERE id = ? AND user_id = ?';
-      checkParams = [contractId, req.user.id];
-    }
-
-    db.query(checkQuery, checkParams, (err, results) => {
+    // Start transaction
+    conn.beginTransaction((err) => {
       if (err) {
-        console.error('Database error:', err);
-        return res.status(500).json({ error: 'Database error' });
+        conn.release();
+        console.error('Transaction error:', err);
+        return res.status(500).json({ error: 'Transaction error' });
       }
 
-      if (results.length === 0) {
-        return res.status(404).json({ error: 'قرارداد یافت نشد یا دسترسی ندارید' });
-      }
-
-      const currentContract = results[0];
-
-      // Validate contract date if provided
-      let contractDate = currentContract.contract_date;
-      if (contract_date) {
-        const newDate = new Date(contract_date);
-        if (isNaN(newDate.getTime())) {
-          return res.status(400).json({ error: 'تاریخ قرارداد نامعتبر است' });
-        }
-        contractDate = newDate.toISOString().split('T')[0];
-      }
-
-      // Update contract
-      const updateContractQuery = `
-        UPDATE contracts 
-        SET 
-          contract_type = ?,
-          contract_date = ?,
-          amount = ?,
-          duration_months = ?,
-          payment_method = ?,
-          commission = ?,
-          status = ?,
-          notes = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `;
-
-      db.query(
-        updateContractQuery,
-        [
-          contract_type || currentContract.contract_type,
-          contractDate,
-          amount || currentContract.amount,
-          duration_months !== undefined ? duration_months : currentContract.duration_months,
-          payment_method || currentContract.payment_method,
-          commission !== undefined ? commission : currentContract.commission,
-          status || currentContract.status,
-          notes || currentContract.notes,
-          contractId
-        ],
-        (err) => {
-          if (err) {
+      // First, verify the contract exists
+      const checkContractQuery = 'SELECT id FROM contracts WHERE id = ?';
+      conn.query(checkContractQuery, [contractId], (err, contractResults) => {
+        if (err) {
+          return conn.rollback(() => {
+            conn.release();
             console.error('Database error:', err);
-            return res.status(500).json({ error: 'Failed to update contract' });
-          }
-
-          // Get updated contract
-          const getUpdatedQuery = `
-            SELECT 
-              c.*,
-              u.name as agent_name,
-              u.phone_number as agent_phone,
-              cust.name as customer_name,
-              cust.contact as customer_phone,
-              e.project as estate_project,
-              e.block as estate_block,
-              e.floor as estate_floor,
-              e.area as estate_area,
-              e.estate_type
-            FROM contracts c
-            JOIN users u ON c.user_id = u.id
-            JOIN customers cust ON c.customer_id = cust.id
-            JOIN estates e ON c.estate_id = e.id
-            WHERE c.id = ?
-          `;
-
-          db.query(getUpdatedQuery, [contractId], (err, updatedResults) => {
-            if (err) {
-              console.error('Database error:', err);
-              return res.status(500).json({ error: 'Failed to fetch updated contract' });
-            }
-
-            res.json(updatedResults[0]);
+            res.status(500).json({ error: 'Database error' });
           });
         }
-      );
+
+        if (contractResults.length === 0) {
+          return conn.rollback(() => {
+            conn.release();
+            res.status(404).json({ error: 'قرارداد یافت نشد' });
+          });
+        }
+
+        // Extract all user_ids from the request
+        const requestedUserIds = users.map(u => u.user_id);
+
+        // Verify all users exist in the users table
+        const placeholders = requestedUserIds.map(() => '?').join(',');
+        const checkUsersQuery = `SELECT id FROM users WHERE id IN (${placeholders})`;
+
+        conn.query(checkUsersQuery, requestedUserIds, (err, userResults) => {
+          if (err) {
+            return conn.rollback(() => {
+              conn.release();
+              console.error('Database error:', err);
+              res.status(500).json({ error: 'Database error' });
+            });
+          }
+
+          // Check if all requested users exist
+          const existingUserIds = userResults.map(u => u.id);
+          const missingUsers = requestedUserIds.filter(id => !existingUserIds.includes(id));
+
+          if (missingUsers.length > 0) {
+            return conn.rollback(() => {
+              conn.release();
+              res.status(404).json({
+                error: 'برخی از کاربران یافت نشدند',
+                missing_users: missingUsers
+              });
+            });
+          }
+
+          // Get current users in the contract
+          const getCurrentUsersQuery = 'SELECT user_id FROM contract_users WHERE contract_id = ?';
+
+          conn.query(getCurrentUsersQuery, [contractId], (err, currentUserResults) => {
+            if (err) {
+              return conn.rollback(() => {
+                conn.release();
+                console.error('Database error:', err);
+                res.status(500).json({ error: 'Database error' });
+              });
+            }
+
+            const currentUserIds = currentUserResults.map(u => u.user_id);
+
+            // Determine which users to remove (in current but not in requested)
+            const usersToRemove = currentUserIds.filter(id => !requestedUserIds.includes(id));
+
+            // Determine which users to add (in requested but not in current)
+            const usersToAdd = users.filter(u => !currentUserIds.includes(u.user_id));
+
+            // Determine which users to update (in both)
+            const usersToUpdate = users.filter(u => currentUserIds.includes(u.user_id));
+
+            // Remove users that are no longer associated
+            if (usersToRemove.length > 0) {
+              const removePlaceholders = usersToRemove.map(() => '?').join(',');
+              const removeQuery = `DELETE FROM contract_users WHERE contract_id = ? AND user_id IN (${removePlaceholders})`;
+
+              conn.query(removeQuery, [contractId, ...usersToRemove], (err) => {
+                if (err) {
+                  return conn.rollback(() => {
+                    conn.release();
+                    console.error('Database error:', err);
+                    res.status(500).json({ error: 'Failed to remove users from contract' });
+                  });
+                }
+                processNext();
+              });
+            } else {
+              processNext();
+            }
+
+            function processNext() {
+              // Add new users
+              if (usersToAdd.length > 0) {
+                const addValues = usersToAdd.map(user => [
+                  contractId,
+                  user.user_id,
+                  user.description || "",
+                  user.role || 'collaborator',
+                  user.fee_amount || 0
+                ]);
+
+                const addQuery = `
+                  INSERT INTO contract_users (contract_id, user_id, description, role, fee)
+                  VALUES ?
+                `;
+
+                conn.query(addQuery, [addValues], (err) => {
+                  if (err) {
+                    return conn.rollback(() => {
+                      conn.release();
+                      console.error('Database error:', err);
+                      res.status(500).json({ error: 'Failed to add users to contract' });
+                    });
+                  }
+                  return processUpdateExisting();
+                });
+              } else {
+                return processUpdateExisting();
+              }
+            }
+
+            function processUpdateExisting() {
+              // Update existing users
+              if (usersToUpdate.length > 0) {
+                // Use Promise-like pattern to handle multiple updates
+                let updateCount = 0;
+
+                usersToUpdate.forEach(user => {
+                  const updateQuery = `
+                    UPDATE contract_users 
+                    SET description = ?, role = ?, fee = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE contract_id = ? AND user_id = ?
+                  `;
+
+                  conn.query(
+                    updateQuery,
+                    [
+                      user.description || null,
+                      user.role || 'collaborator',
+                      user.fee_amount || null,
+                      contractId,
+                      user.user_id
+                    ],
+                    (err) => {
+                      if (err) {
+                        return conn.rollback(() => {
+                          conn.release();
+                          console.error('Database error:', err);
+                          res.status(500).json({ error: 'Failed to update user information' });
+                        });
+                      }
+
+                      updateCount++;
+                      if (updateCount === usersToUpdate.length) {
+                        // All updates complete
+                        finalizeTransaction();
+                      }
+                    }
+                  );
+                });
+              } else {
+                finalizeTransaction();
+              }
+            }
+
+            function finalizeTransaction() {
+              // Commit the transaction
+              conn.commit((err) => {
+                if (err) {
+                  return conn.rollback(() => {
+                    conn.release();
+                    console.error('Commit error:', err);
+                    res.status(500).json({ error: 'Transaction failed' });
+                  });
+                }
+
+                // Fetch and return the updated users list
+                const getUpdatedUsersQuery = `
+                  SELECT 
+                    cu.user_id,
+                    cu.description,
+                    cu.role,
+                    cu.fee,
+                    u.name as user_name,
+                    u.phone_number as user_phone
+                  FROM contract_users cu
+                  JOIN users u ON cu.user_id = u.id
+                  WHERE cu.contract_id = ?
+                `;
+
+                conn.query(getUpdatedUsersQuery, [contractId], (err, updatedUsers) => {
+                  conn.release();
+
+                  if (err) {
+                    console.error('Database error:', err);
+                    return res.status(200).json({
+                      message: 'کاربران قرارداد با موفقیت به‌روزرسانی شدند',
+                      warning: 'خطا در دریافت لیست به‌روز شده'
+                    });
+                  }
+
+                  res.json({
+                    message: 'کاربران قرارداد با موفقیت به‌روزرسانی شدند',
+                    users: updatedUsers
+                  });
+                });
+              });
+            }
+          });
+        });
+      });
     });
   });
 });
