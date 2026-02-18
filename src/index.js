@@ -1460,7 +1460,8 @@ app.post('/api/auth/login', (req, res) => {
       // Check if user is approved
       if (!user.approved) {
         return res.status(403).json({
-          error: 'Account pending approval. Please wait for admin approval.'
+          // error: 'Account pending approval. Please wait for admin approval.'
+          error: 'اکانت شما هنوز توسط مدیریت، تأیید نشده'
         });
       }
 
