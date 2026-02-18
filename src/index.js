@@ -17,8 +17,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
-  // origin: ['https://agent.inmelk.com'],
+  origin: ['http://localhost:5173', 'http://localhost:3000',],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -1459,11 +1458,11 @@ app.post('/api/auth/login', (req, res) => {
       const user = results[0];
 
       // Check if user is approved
-      //   if (!user.approved) {
-      //     return res.status(403).json({ 
-      //       error: 'Account pending approval. Please wait for admin approval.' 
-      //     });
-      //   }
+      if (!user.approved) {
+        return res.status(403).json({
+          error: 'Account pending approval. Please wait for admin approval.'
+        });
+      }
 
       // Check password
       const validPassword = await bcrypt.compare(password, user.password);
@@ -3170,7 +3169,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
         'انقد سیخونک نکن سیستم رو!!!'
       ]
 
-      if (userResults[0].role == "god") {
+      if (userResults[0].role == "god" || userResults[0].role == "admin") {
         return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
         // return res.status(401).json({ error: 'You lack permission' });
 
@@ -3528,7 +3527,7 @@ app.put('/api/admin/users/:id/toggle-admin', verifyTokenAndApproval, (req, res) 
         '!!!تنها 1 شانس دیگر دارید!!!'
       ]
 
-      if (results[0].role == "god") {
+      if (results[0].role == "god" || userResults[0].role == "admin") {
         return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
         // return res.status(401).json({ error: 'You lack permission' });
       }
