@@ -594,7 +594,7 @@ app.put('/api/invoices/:uuid', verifyTokenAndApproval, uploadinvoice.single('inv
         if (req.file) {
           fs.unlinkSync(req.file.path);
         }
-        return res.status(403).json({ error: 'Not authorized to update this invoice' });
+        return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
       }
 
       // Prepare update data
@@ -727,7 +727,7 @@ app.delete('/api/invoices/:uuid', verifyTokenAndApproval, async (req, res) => {
 
       // Authorization check - only creator or admin can delete
       if (invoice.issued_by !== userId && req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Not authorized to delete this invoice' });
+        return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
       }
 
       // Get photo path before deletion
@@ -903,7 +903,7 @@ app.post('/api/maps/upload', verifyTokenAndApproval, uploadMap.single('file'), a
         if (req.file) {
           fs.unlinkSync(req.file.path);
         }
-        return res.status(403).json({ error: 'Admin access required for upload' });
+        return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
       }
 
       const { title, description, uploaded_by } = req.body;
@@ -1016,7 +1016,7 @@ app.put('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
   const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const { title, description } = req.body;
@@ -1088,7 +1088,7 @@ app.delete('/api/maps/:id', verifyTokenAndApproval, (req, res) => {
   const checkAdminQuery = 'SELECT is_admin FROM users WHERE id = ?';
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     // First get map to delete its file
@@ -1461,7 +1461,7 @@ app.post('/api/auth/login', (req, res) => {
       if (!user.approved) {
         return res.status(403).json({
           // error: 'Account pending approval. Please wait for admin approval.'
-          error: 'اکانت شما هنوز توسط مدیریت، تأیید نشده'
+          error: 'حساب کاربری شما تأیید نشده'
         });
       }
 
@@ -2920,7 +2920,7 @@ app.delete('/api/contracts/:id', verifyTokenAndApproval, (req, res) => {
   // Check if user is admin
   checkIsAdmin(req.user.id, (err, isAdmin) => {
     if (err || !isAdmin) {
-      return res.status(403).json({ error: 'دسترسی ادمین مورد نیاز است' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     // First check if contract exists
@@ -3085,7 +3085,7 @@ app.get('/api/admin/pending-users', verifyTokenAndApproval, (req, res) => {
 
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const getPendingUsersQuery = `
@@ -3113,7 +3113,7 @@ app.post('/api/admin/approve-user/:userId', verifyTokenAndApproval, (req, res) =
 
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const approveUserQuery = `
@@ -3139,7 +3139,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
 
   db.query(checkAdminQuery, [req.user.id], (err, results) => {
     if (err || !results[0]?.is_admin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     // First get user to delete their ID photo
@@ -3195,7 +3195,7 @@ app.get('/api/users', verifyTokenAndApproval, (req, res) => {
 
   // Check if user is requesting their own data or is admin
   if (!req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
   }
 
   // Parse query parameters
@@ -3236,7 +3236,7 @@ app.get('/api/users/select-list', verifyTokenAndApproval, (req, res) => {
 
   // Check if user is admin (only admins can create contracts)
   if (!req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
   }
 
   const getUserQuery = `
@@ -3267,7 +3267,7 @@ app.get('/api/users/:id', verifyTokenAndApproval, (req, res) => {
 
   // Check if user is requesting their own data or is admin
   if (req.user.id != userId && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
   }
 
   const getUserQuery = `
@@ -3298,7 +3298,7 @@ app.get('/api/users/', verifyTokenAndApproval, (req, res) => {
 
   // Check if user is requesting their own data or is admin
   if (!req.user.isAdmin) {
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
   }
 
   // Parse query parameters
@@ -3340,7 +3340,7 @@ app.put('/api/users/:id', verifyTokenAndApproval, (req, res) => {
 
   // Check if user is updating their own data
   if (req.user.id != userId && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
   }
 
   // Validation
@@ -3442,7 +3442,7 @@ app.get('/api/admin/users', verifyTokenAndApproval, (req, res) => {
   // Check if user is admin
   checkIsAdmin(req.user.id, (err, isAdmin) => {
     if (err || !isAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const page = parseInt(req.query.page) || 1;
@@ -3495,7 +3495,7 @@ app.get('/api/admin/users', verifyTokenAndApproval, (req, res) => {
 app.put('/api/admin/users/:id/toggle-admin', verifyTokenAndApproval, (req, res) => {
   checkIsAdmin(req.user.id, (err, isAdmin) => {
     if (err || !isAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const userId = req.params.id;
@@ -3557,7 +3557,7 @@ app.put('/api/admin/users/:id/toggle-admin', verifyTokenAndApproval, (req, res) 
 app.post('/api/admin/users/:id/reset-password', verifyTokenAndApproval, async (req, res) => {
   checkIsAdmin(req.user.id, (err, isAdmin) => {
     if (err || !isAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const userId = req.params.id;
@@ -3625,7 +3625,7 @@ app.post('/api/admin/users/:id/reset-password', verifyTokenAndApproval, async (r
 app.delete('/api/admin/users/:id', verifyTokenAndApproval, (req, res) => {
   checkIsAdmin(req.user.id, (err, isAdmin) => {
     if (err || !isAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const userId = req.params.id;
@@ -3687,7 +3687,7 @@ app.get('/api/users/:id/details', verifyTokenAndApproval, (req, res) => {
     }
 
     if (parseInt(userId) !== parseInt(req.user.id) && !isAdmin) {
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(403).json({ error: 'سطح دسترسی ناکافی است' });
     }
 
     const query = `
