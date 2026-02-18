@@ -3169,7 +3169,7 @@ app.delete('/api/admin/reject-user/:userId', verifyTokenAndApproval, (req, res) 
         'انقد سیخونک نکن سیستم رو!!!'
       ]
 
-      if (userResults[0].role == "god" || userResults[0].role == "admin") {
+      if (userResults[0].role == "god") {
         return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
         // return res.status(401).json({ error: 'You lack permission' });
 
@@ -3527,7 +3527,7 @@ app.put('/api/admin/users/:id/toggle-admin', verifyTokenAndApproval, (req, res) 
         '!!!تنها 1 شانس دیگر دارید!!!'
       ]
 
-      if (results[0].role == "god" || userResults[0].role == "admin") {
+      if (results[0].role == "god") {
         return res.status(987).json({ error: taunts[Math.floor(Math.random() * taunts.length)] });
         // return res.status(401).json({ error: 'You lack permission' });
       }
