@@ -2010,7 +2010,7 @@ app.post('/api/estates', verifyTokenAndApproval, (req, res) => {
     rooms,
     deed_type,
     total_floors,
-    total_units_per_floor,
+    units_per_floor,
     occupancy_status,
     notes,
     estate_type,
@@ -2053,7 +2053,7 @@ app.post('/api/estates', verifyTokenAndApproval, (req, res) => {
     return res.status(400).json({ error: 'Total floors must be a non-negative integer' });
   }
 
-  if (!total_units_per_floor || total_units_per_floor <= 0) {
+  if (!units_per_floor || units_per_floor <= 0) {
     return res.status(400).json({ error: 'Floor must be an Integer more than zero' });
   }
 
@@ -2119,7 +2119,7 @@ app.post('/api/estates', verifyTokenAndApproval, (req, res) => {
         deed_type,
         occupancy_status,
         total_floors,
-        total_units_per_floor,
+        units_per_floor,
         JSON.stringify(features)
       ],
       (err, result) => {
