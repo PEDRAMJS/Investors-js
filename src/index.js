@@ -2778,7 +2778,6 @@ app.delete('/api/contracts/:id/users/:userId', verifyTokenAndApproval, (req, res
 // Unified API for managing contract users
 app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('files'), (req, res) => {
   const contractId = req.params.id;
-
   const users = JSON.parse(req.body.users)
 
   // Get database connection for transaction
@@ -2797,7 +2796,7 @@ app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('file
       }
 
       // First, verify the contract exists
-      const checkContractQuery = 'SELECT id FROM contracts WHERE id = ?';
+      const checkContractQuery = 'SELECT id, attachments FROM contracts WHERE id = ?';
       conn.query(checkContractQuery, [contractId], (err, contractResults) => {
         if (err) {
           return conn.rollback(() => {
@@ -2814,14 +2813,62 @@ app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('file
           });
         }
 
-        // Extract all user_ids from the request
-        const requestedUserIds = users.map(u => u.user_id);
+        const currentAttachments = contractResults[0].attachments
 
-        // Verify all users exist in the users table
-        const placeholders = requestedUserIds.map(() => '?').join(',');
-        const checkUsersQuery = `SELECT id FROM users WHERE id IN (${placeholders})`;
+        const bodyFiles = JSON.parse(req.body.files);
 
-        conn.query(checkUsersQuery, requestedUserIds, (err, userResults) => {
+        const contractPaths = new Set(
+          bodyFiles.map(attachment => attachment.path)
+        );
+
+
+        // console.log("Current files: ", contractPaths);
+
+        const filesToKeep = currentAttachments.filter(file => {
+          // console.log(file.path);
+          return contractPaths.has(file.path)
+        });
+        // console.log("Files to keep: ", filesToKeep);
+
+        const deletedFiles = currentAttachments.filter(file => {
+          // console.log(file.path);
+          return !contractPaths.has(file.path)
+        });
+        // console.log("Files to delete: ", deletedFiles);
+
+        deletedFiles.forEach((file) => {
+          let filePath = path.join(__dirname, '../uploads/contracts/', file.filename)
+          // console.log("Deleting file: ", filePath);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          } else {
+            console.log("Couldn't find the file to delete: ", filePath);
+          }
+        })
+
+        let newAttachments = req.files.map((attachment) => {
+          attachment.path = `/uploads/contracts/${attachment.filename}`
+          return attachment
+        })
+
+        newAttachments = [...newAttachments, ...filesToKeep]
+
+        const updateContractQuery = `
+          UPDATE contracts
+          SET 
+            notes = ?,
+            status = ?,
+            attachments = ?
+          WHERE id = ?
+        `
+
+        // return conn.rollback(() => {
+        //   conn.release();
+        //   res.status(404).json({ error: 'قرارداد یافت نشد' });
+        // });
+
+        conn.query(updateContractQuery, [req.body.notes, req.body.status, JSON.stringify(newAttachments), contractResults[0].id], (err) => {
+
           if (err) {
             return conn.rollback(() => {
               conn.release();
@@ -2830,24 +2877,13 @@ app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('file
             });
           }
 
-          // Check if all requested users exist
-          const existingUserIds = userResults.map(u => u.id);
-          const missingUsers = requestedUserIds.filter(id => !existingUserIds.includes(id));
+          // Extract all user_ids from the request
+          const requestedUserIds = users.map(u => u.user_id);
+          // Verify all users exist in the users table
+          const placeholders = requestedUserIds.map(() => '?').join(',');
+          const checkUsersQuery = `SELECT id FROM users WHERE id IN (${placeholders})`;
 
-          if (missingUsers.length > 0) {
-            return conn.rollback(() => {
-              conn.release();
-              res.status(404).json({
-                error: 'برخی از کاربران یافت نشدند',
-                missing_users: missingUsers
-              });
-            });
-          }
-
-          // Get current users in the contract
-          const getCurrentUsersQuery = 'SELECT user_id FROM contract_users WHERE contract_id = ?';
-
-          conn.query(getCurrentUsersQuery, [contractId], (err, currentUserResults) => {
+          conn.query(checkUsersQuery, requestedUserIds, (err, userResults) => {
             if (err) {
               return conn.rollback(() => {
                 conn.release();
@@ -2856,124 +2892,149 @@ app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('file
               });
             }
 
-            const currentUserIds = currentUserResults.map(u => u.user_id);
+            // Check if all requested users exist
+            const existingUserIds = userResults.map(u => u.id);
+            const missingUsers = requestedUserIds.filter(id => !existingUserIds.includes(id));
 
-            // Determine which users to remove (in current but not in requested)
-            const usersToRemove = currentUserIds.filter(id => !requestedUserIds.includes(id));
-
-            // Determine which users to add (in requested but not in current)
-            const usersToAdd = users.filter(u => !currentUserIds.includes(u.user_id));
-
-            // Determine which users to update (in both)
-            const usersToUpdate = users.filter(u => currentUserIds.includes(u.user_id));
-
-            // Remove users that are no longer associated
-            if (usersToRemove.length > 0) {
-              const removePlaceholders = usersToRemove.map(() => '?').join(',');
-              const removeQuery = `DELETE FROM contract_users WHERE contract_id = ? AND user_id IN (${removePlaceholders})`;
-
-              conn.query(removeQuery, [contractId, ...usersToRemove], (err) => {
-                if (err) {
-                  return conn.rollback(() => {
-                    conn.release();
-                    console.error('Database error:', err);
-                    res.status(500).json({ error: 'Failed to remove users from contract' });
-                  });
-                }
-                processNext();
+            if (missingUsers.length > 0) {
+              return conn.rollback(() => {
+                conn.release();
+                res.status(404).json({
+                  error: 'برخی از کاربران یافت نشدند',
+                  missing_users: missingUsers
+                });
               });
-            } else {
-              processNext();
             }
 
-            function processNext() {
-              // Add new users
-              if (usersToAdd.length > 0) {
-                const addValues = usersToAdd.map(user => [
-                  contractId,
-                  user.user_id,
-                  user.description || "",
-                  user.role || 'collaborator',
-                  user.fee_amount || 0
-                ]);
+            // Get current users in the contract
+            const getCurrentUsersQuery = 'SELECT user_id FROM contract_users WHERE contract_id = ?';
+            conn.query(getCurrentUsersQuery, [contractId], (err, currentUserResults) => {
+              if (err) {
+                return conn.rollback(() => {
+                  conn.release();
+                  console.error('Database error:', err);
+                  res.status(500).json({ error: 'Database error' });
+                });
+              }
 
-                const addQuery = `
-                  INSERT INTO contract_users (contract_id, user_id, description, role, fee)
-                  VALUES ?
-                `;
+              const currentUserIds = currentUserResults.map(u => u.user_id);
 
-                conn.query(addQuery, [addValues], (err) => {
+              // Determine which users to remove (in current but not in requested)
+              const usersToRemove = currentUserIds.filter(id => !requestedUserIds.includes(id));
+
+              // Determine which users to add (in requested but not in current)
+              const usersToAdd = users.filter(u => !currentUserIds.includes(u.user_id));
+
+              // Determine which users to update (in both)
+              const usersToUpdate = users.filter(u => currentUserIds.includes(u.user_id));
+
+              // Remove users that are no longer associated
+              if (usersToRemove.length > 0) {
+                const removePlaceholders = usersToRemove.map(() => '?').join(',');
+                const removeQuery = `DELETE FROM contract_users WHERE contract_id = ? AND user_id IN (${removePlaceholders})`;
+
+                conn.query(removeQuery, [contractId, ...usersToRemove], (err) => {
                   if (err) {
                     return conn.rollback(() => {
                       conn.release();
                       console.error('Database error:', err);
-                      res.status(500).json({ error: 'Failed to add users to contract' });
+                      res.status(500).json({ error: 'Failed to remove users from contract' });
                     });
                   }
-                  return processUpdateExisting();
+                  processNext();
                 });
               } else {
-                return processUpdateExisting();
+                processNext();
               }
-            }
 
-            function processUpdateExisting() {
-              // Update existing users
-              if (usersToUpdate.length > 0) {
-                // Use Promise-like pattern to handle multiple updates
-                let updateCount = 0;
+              function processNext() {
+                // Add new users
+                if (usersToAdd.length > 0) {
+                  const addValues = usersToAdd.map(user => [
+                    contractId,
+                    user.user_id,
+                    user.description || "",
+                    user.role || 'collaborator',
+                    user.fee_amount || 0
+                  ]);
 
-                usersToUpdate.forEach(user => {
-                  const updateQuery = `
+                  const addQuery = `
+                  INSERT INTO contract_users (contract_id, user_id, description, role, fee)
+                  VALUES ?
+                `;
+
+                  conn.query(addQuery, [addValues], (err) => {
+                    if (err) {
+                      return conn.rollback(() => {
+                        conn.release();
+                        console.error('Database error:', err);
+                        res.status(500).json({ error: 'Failed to add users to contract' });
+                      });
+                    }
+                    return processUpdateExisting();
+                  });
+                } else {
+                  return processUpdateExisting();
+                }
+              }
+
+              function processUpdateExisting() {
+                // Update existing users
+                if (usersToUpdate.length > 0) {
+                  // Use Promise-like pattern to handle multiple updates
+                  let updateCount = 0;
+
+                  usersToUpdate.forEach(user => {
+                    const updateQuery = `
                     UPDATE contract_users 
                     SET description = ?, role = ?, fee = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE contract_id = ? AND user_id = ?
                   `;
 
-                  conn.query(
-                    updateQuery,
-                    [
-                      user.description || null,
-                      user.role || 'collaborator',
-                      user.fee_amount || null,
-                      contractId,
-                      user.user_id
-                    ],
-                    (err) => {
-                      if (err) {
-                        return conn.rollback(() => {
-                          conn.release();
-                          console.error('Database error:', err);
-                          res.status(500).json({ error: 'Failed to update user information' });
-                        });
-                      }
+                    conn.query(
+                      updateQuery,
+                      [
+                        user.description || null,
+                        user.role || 'collaborator',
+                        user.fee_amount || null,
+                        contractId,
+                        user.user_id
+                      ],
+                      (err) => {
+                        if (err) {
+                          return conn.rollback(() => {
+                            conn.release();
+                            console.error('Database error:', err);
+                            res.status(500).json({ error: 'Failed to update user information' });
+                          });
+                        }
 
-                      updateCount++;
-                      if (updateCount === usersToUpdate.length) {
-                        // All updates complete
-                        finalizeTransaction();
+                        updateCount++;
+                        if (updateCount === usersToUpdate.length) {
+                          // All updates complete
+                          finalizeTransaction();
+                        }
                       }
-                    }
-                  );
-                });
-              } else {
-                finalizeTransaction();
-              }
-            }
-
-            function finalizeTransaction() {
-              // Commit the transaction
-              conn.commit((err) => {
-                if (err) {
-                  return conn.rollback(() => {
-                    conn.release();
-                    console.error('Commit error:', err);
-                    res.status(500).json({ error: 'Transaction failed' });
+                    );
                   });
+                } else {
+                  finalizeTransaction();
                 }
+              }
 
-                // Fetch and return the updated users list
-                const getUpdatedUsersQuery = `
+              function finalizeTransaction() {
+                // Commit the transaction
+                conn.commit((err) => {
+                  if (err) {
+                    return conn.rollback(() => {
+                      conn.release();
+                      console.error('Commit error:', err);
+                      res.status(500).json({ error: 'Transaction failed' });
+                    });
+                  }
+
+                  // Fetch and return the updated users list
+                  const getUpdatedUsersQuery = `
                   SELECT 
                     cu.user_id,
                     cu.description,
@@ -2986,24 +3047,25 @@ app.put('/api/contracts/:id', verifyTokenAndApproval, uploadContract.array('file
                   WHERE cu.contract_id = ?
                 `;
 
-                conn.query(getUpdatedUsersQuery, [contractId], (err, updatedUsers) => {
-                  conn.release();
+                  conn.query(getUpdatedUsersQuery, [contractId], (err, updatedUsers) => {
+                    conn.release();
 
-                  if (err) {
-                    console.error('Database error:', err);
-                    return res.status(200).json({
+                    if (err) {
+                      console.error('Database error:', err);
+                      return res.status(200).json({
+                        message: 'کاربران قرارداد با موفقیت به‌روزرسانی شدند',
+                        warning: 'خطا در دریافت لیست به‌روز شده'
+                      });
+                    }
+
+                    res.json({
                       message: 'کاربران قرارداد با موفقیت به‌روزرسانی شدند',
-                      warning: 'خطا در دریافت لیست به‌روز شده'
+                      users: updatedUsers
                     });
-                  }
-
-                  res.json({
-                    message: 'کاربران قرارداد با موفقیت به‌روزرسانی شدند',
-                    users: updatedUsers
                   });
                 });
-              });
-            }
+              }
+            });
           });
         });
       });
